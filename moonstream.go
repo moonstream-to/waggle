@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 )
@@ -66,20 +65,16 @@ type MoonstreamEngineAPIClient struct {
 }
 
 func ClientFromEnv() (*MoonstreamEngineAPIClient, error) {
-	accessToken := os.Getenv("MOONSTREAM_ENGINE_ACCESS_TOKEN")
-
-	if accessToken == "" {
-		return nil, fmt.Errorf("set the MOONSTREAM_ENGINE_ACCESS_TOKEN environment variable")
+	if MOONSTREAM_ACCESS_TOKEN == "" {
+		return nil, fmt.Errorf("set the MOONSTREAM_ACCESS_TOKEN environment variable")
 	}
-	baseURL := os.Getenv("MOONSTREAM_ENGINE_BASE_URL")
-	if baseURL == "" {
-		baseURL = "https://engineapi.moonstream.to"
+	if MOONSTREAM_API_URL == "" {
+		MOONSTREAM_API_URL = "https://api.moonstream.to"
 	}
-	timeoutSecondsRaw := os.Getenv("MOONSTREAM_ENGINE_TIMEOUT_SECONDS")
-	if timeoutSecondsRaw == "" {
-		timeoutSecondsRaw = "30"
+	if MOONSTREAM_API_TIMEOUT_SECONDS == "" {
+		MOONSTREAM_API_TIMEOUT_SECONDS = "30"
 	}
-	timeoutSeconds, conversionErr := strconv.Atoi(timeoutSecondsRaw)
+	timeoutSeconds, conversionErr := strconv.Atoi(MOONSTREAM_API_TIMEOUT_SECONDS)
 	if conversionErr != nil {
 		return nil, conversionErr
 	}
@@ -87,8 +82,8 @@ func ClientFromEnv() (*MoonstreamEngineAPIClient, error) {
 	httpClient := http.Client{Timeout: timeout}
 
 	return &MoonstreamEngineAPIClient{
-		AccessToken: accessToken,
-		BaseURL:     baseURL,
+		AccessToken: MOONSTREAM_ACCESS_TOKEN,
+		BaseURL:     MOONSTREAM_API_URL,
 		HTTPClient:  &httpClient,
 	}, nil
 }
@@ -125,7 +120,7 @@ func (client *MoonstreamEngineAPIClient) ListRegisteredContracts(blockchain, add
 	}
 	defer response.Body.Close()
 
-	responseBody, responseBodyErr := ioutil.ReadAll(response.Body)
+	responseBody, responseBodyErr := io.ReadAll(response.Body)
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if responseBodyErr != nil {
@@ -181,7 +176,7 @@ func (client *MoonstreamEngineAPIClient) ListCallRequests(contractId, contractAd
 	}
 	defer response.Body.Close()
 
-	responseBody, responseBodyErr := ioutil.ReadAll(response.Body)
+	responseBody, responseBodyErr := io.ReadAll(response.Body)
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if responseBodyErr != nil {
@@ -241,7 +236,7 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contract
 	}
 	defer response.Body.Close()
 
-	responseBody, responseBodyErr := ioutil.ReadAll(response.Body)
+	responseBody, responseBodyErr := io.ReadAll(response.Body)
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if responseBodyErr != nil {

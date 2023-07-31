@@ -359,9 +359,6 @@ func CreateSignCommand() *cobra.Command {
 			}
 
 			if bugoutToken == "" {
-				bugoutToken = os.Getenv("BUGOUT_ACCESS_TOKEN")
-			}
-			if bugoutToken == "" {
 				return errors.New("please specify a Bugout API access token, either by passing it as the --token/-t argument or by setting the BUGOUT_ACCESS_TOKEN environment variable")
 			}
 
@@ -372,7 +369,7 @@ func CreateSignCommand() *cobra.Command {
 			return ProcessDropperClaims(&bugoutClient, bugoutToken, journalID, cursorName, query, batchSize, header, os.Stdout)
 		},
 	}
-	dropperPullSubcommand.Flags().StringVarP(&bugoutToken, "token", "t", "", "Bugout API access token. If you don't have one, you can generate one at https://bugout.dev/account/tokens.")
+	dropperPullSubcommand.Flags().StringVarP(&bugoutToken, "token", "t", BUGOUT_ACCESS_TOKEN, "Bugout API access token. If you don't have one, you can generate one at https://bugout.dev/account/tokens.")
 	dropperPullSubcommand.Flags().StringVarP(&journalID, "journal", "j", "", "ID of Bugout journal from which to pull claim requests.")
 	dropperPullSubcommand.Flags().StringVarP(&cursorName, "cursor", "c", "", "Name of cursor which defines which requests are processed and which ones are not.")
 	dropperPullSubcommand.Flags().StringVarP(&query, "query", "q", "", "Additional Bugout search query to apply in Bugout.")

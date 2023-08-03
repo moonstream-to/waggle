@@ -198,29 +198,8 @@ func (client *MoonstreamEngineAPIClient) ListCallRequests(contractId, contractAd
 	return callRequests, nil
 }
 
-func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contractAddress string, ttlDays int, spec []CallRequestSpecification) error {
-	if contractId == "" && contractAddress == "" {
-		return fmt.Errorf("You must specify at least one of contractId or contractAddress when creating call requests")
-	}
-
-	requestBody := CreateCallRequestsRequest{
-		TTLDays:        ttlDays,
-		Specifications: spec,
-	}
-
-	if contractId != "" {
-		requestBody.ContractID = contractId
-	}
-
-	if contractAddress != "" {
-		requestBody.ContractAddress = contractAddress
-	}
-
-	requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)
-	if requestBodyBytesErr != nil {
-		return requestBodyBytesErr
-	}
-
+// sendCallRequests sends a POST request to metatx API
+func (client *MoonstreamEngineAPIClient) sendCallRequests(requestBodyBytes []byte) error {
 	request, requestCreationErr := http.NewRequest("POST", fmt.Sprintf("%s/metatx/requests", client.BaseURL), bytes.NewBuffer(requestBodyBytes))
 	if requestCreationErr != nil {
 		return requestCreationErr
@@ -244,6 +223,62 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contract
 		}
 		responseBodyString := string(responseBody)
 		return fmt.Errorf("unexpected status code: %d -- response body: %s", response.StatusCode, responseBodyString)
+	}
+
+	return nil
+}
+
+func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contractAddress string, ttlDays int, specs []CallRequestSpecification, batchSize int) error {
+	if contractId == "" && contractAddress == "" {
+		return fmt.Errorf("you must specify at least one of contractId or contractAddress when creating call requests")
+	}
+
+	var specBatches [][]CallRequestSpecification
+	for i := 0; i <= len(specs); i += batchSize {
+		if i+batchSize > len(specs) {
+			specBatches = append(specBatches, specs[i:])
+			break
+		}
+		specBatches = append(specBatches, specs[i:i+batchSize])
+	}
+
+	for i, batchSpecs := range specBatches {
+		requestBody := CreateCallRequestsRequest{
+			TTLDays:        ttlDays,
+			Specifications: batchSpecs,
+		}
+
+		if contractId != "" {
+			requestBody.ContractID = contractId
+		}
+
+		if contractAddress != "" {
+			requestBody.ContractAddress = contractAddress
+		}
+
+		requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)
+		if requestBodyBytesErr != nil {
+			return requestBodyBytesErr
+		}
+
+		sendReTryCnt := 1
+		maxSendReTryCnt := 3
+	SEND_RETRY:
+		for sendReTryCnt <= maxSendReTryCnt {
+			sendCallRequestsErr := client.sendCallRequests(requestBodyBytes)
+			if sendCallRequestsErr == nil {
+				break SEND_RETRY
+			}
+			fmt.Printf("During sending call requests an error ocurred: %v, retry %d\n", sendCallRequestsErr, sendReTryCnt)
+			sendReTryCnt++
+			time.Sleep(time.Duration(sendReTryCnt) * time.Second)
+
+			if sendReTryCnt > maxSendReTryCnt {
+				return fmt.Errorf("failed to send call requests")
+			}
+		}
+
+		fmt.Printf("Successfully pushed %d batch of %d total with %d call_requests to API\n", i+1, len(specBatches), len(batchSpecs))
 	}
 
 	return nil

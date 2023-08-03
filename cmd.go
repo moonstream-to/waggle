@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -391,7 +392,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 	}
 
 	var blockchain, address, contractType, contractId, contractAddress, infile string
-	var limit, offset int
+	var limit, offset, batchSize int
 
 	contractsSubcommand := &cobra.Command{
 		Use:   "contracts",
@@ -461,6 +462,10 @@ func CreateMoonstreamCommand() *cobra.Command {
 				return readErr
 			}
 
+			if batchSize == 0 {
+				return fmt.Errorf("wor")
+			}
+
 			var messages []*DropperClaimMessage
 			parseErr := json.Unmarshal(messagesRaw, &messages)
 			if parseErr != nil {
@@ -483,7 +488,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 				}
 			}
 
-			err := client.CreateCallRequests(contractId, contractAddress, limit, callRequests)
+			err := client.CreateCallRequests(contractId, contractAddress, limit, callRequests, batchSize)
 			return err
 		},
 	}
@@ -491,6 +496,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 	createCallRequestsSubcommand.Flags().StringVar(&contractAddress, "contract-address", "", "Address of the contract (at least one of --contract-id or --contract-address must be specified)")
 	createCallRequestsSubcommand.Flags().IntVar(&limit, "ttl-days", 30, "Number of days for which request will remain active")
 	createCallRequestsSubcommand.Flags().StringVar(&infile, "infile", "", "Input file. If not specified, input will be expected from stdin.")
+	createCallRequestsSubcommand.Flags().IntVar(&batchSize, "batch-size", 100, "Number of rows per request to API")
 
 	moonstreamCommand.AddCommand(contractsSubcommand, callRequestsSubcommand, createCallRequestsSubcommand)
 

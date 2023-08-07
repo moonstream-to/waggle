@@ -9,7 +9,7 @@
 ### Installation
 
 ```
-go install github.com/bugout-dev/engine/waggle
+go install github.com/moonstream-to/waggle@latest
 ```
 
 ### Usage

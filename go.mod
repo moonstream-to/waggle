@@ -1,4 +1,4 @@
-module github.com/bugout-dev/engine/waggle
+module github.com/moonstream-to/waggle
 
 go 1.19
 

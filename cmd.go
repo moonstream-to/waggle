@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 
 	bugout "github.com/bugout-dev/bugout-go/pkg"
@@ -477,17 +476,10 @@ func CreateMoonstreamCommand() *cobra.Command {
 
 			callRequests := make([]CallRequestSpecification, len(messages))
 			for i, message := range messages {
-				requestId := new(big.Int)
-				requestId, ok := requestId.SetString(message.RequestID, 10)
-				if !ok {
-					fmt.Println("SetString: error")
-					return fmt.Errorf("unable to convert RequestID to big integer")
-				}
-
 				callRequests[i] = CallRequestSpecification{
 					Caller:    message.Claimant,
 					Method:    "claim",
-					RequestId: *requestId,
+					RequestId: message.RequestID,
 					Parameters: DropperCallRequestParameters{
 						DropId:        message.DropId,
 						BlockDeadline: message.BlockDeadline,

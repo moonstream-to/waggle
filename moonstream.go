@@ -5,43 +5,42 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"strconv"
 	"time"
 )
 
 type RegisteredContract struct {
-	Id               string    `json:"id"`
-	Blockchain       string    `json:"blockchain"`
-	Address          string    `json:"address"`
+	Id                string    `json:"id"`
+	Blockchain        string    `json:"blockchain"`
+	Address           string    `json:"address"`
 	MetatxRequesterId string    `json:"metatx_requester_id"`
-	Title            string    `json:"title"`
-	Description      string    `json:"description"`
-	ImageURI         string    `json:"image_uri"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	Title             string    `json:"title"`
+	Description       string    `json:"description"`
+	ImageURI          string    `json:"image_uri"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type CallRequest struct {
-	Id               string      `json:"id"`
-	ContractId       string      `json:"contract_id"`
-	ContractAddress  string      `json:"contract_address"`
+	Id                string      `json:"id"`
+	ContractId        string      `json:"contract_id"`
+	ContractAddress   string      `json:"contract_address"`
 	MetatxRequesterId string      `json:"metatx_requester_id"`
-	CallRequestType string `json:"call_request_type"`
-	Caller           string      `json:"caller"`
-	Method           string      `json:"method"`
-	RequestId big.Int `json:"request_id"`
-	Parameters       interface{} `json:"parameters"`
-	ExpiresAt        time.Time   `json:"expires_at"`
-	CreatedAt        time.Time   `json:"created_at"`
-	UpdateAt         time.Time   `json:"updated_at"`
+	CallRequestType   string      `json:"call_request_type"`
+	Caller            string      `json:"caller"`
+	Method            string      `json:"method"`
+	RequestId         string      `json:"request_id"`
+	Parameters        interface{} `json:"parameters"`
+	ExpiresAt         time.Time   `json:"expires_at"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdateAt          time.Time   `json:"updated_at"`
 }
 
 type CallRequestSpecification struct {
 	Caller     string      `json:"caller"`
 	Method     string      `json:"method"`
-	RequestId big.Int `json:"request_id"`
+	RequestId  string      `json:"request_id"`
 	Parameters interface{} `json:"parameters"`
 }
 

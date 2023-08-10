@@ -11,34 +11,36 @@ import (
 )
 
 type RegisteredContract struct {
-	Id               string    `json:"id"`
-	Blockchain       string    `json:"blockchain"`
-	Address          string    `json:"address"`
-	ContractType     string    `json:"contract_type"`
-	MoonstreamUserId string    `json:"moonstream_user_id"`
-	Title            string    `json:"title"`
-	Description      string    `json:"description"`
-	ImageURI         string    `json:"image_uri"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	Id                string    `json:"id"`
+	Blockchain        string    `json:"blockchain"`
+	Address           string    `json:"address"`
+	MetatxRequesterId string    `json:"metatx_requester_id"`
+	Title             string    `json:"title"`
+	Description       string    `json:"description"`
+	ImageURI          string    `json:"image_uri"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type CallRequest struct {
-	Id               string      `json:"id"`
-	ContractId       string      `json:"contract_id"`
-	ContractAddress  string      `json:"contract_address"`
-	MoonstreamUserId string      `json:"moonstream_user_id"`
-	Caller           string      `json:"caller"`
-	Method           string      `json:"method"`
-	Parameters       interface{} `json:"parameters"`
-	ExpiresAt        time.Time   `json:"expires_at"`
-	CreatedAt        time.Time   `json:"created_at"`
-	UpdateAt         time.Time   `json:"updated_at"`
+	Id                string      `json:"id"`
+	ContractId        string      `json:"contract_id"`
+	ContractAddress   string      `json:"contract_address"`
+	MetatxRequesterId string      `json:"metatx_requester_id"`
+	CallRequestType   string      `json:"call_request_type"`
+	Caller            string      `json:"caller"`
+	Method            string      `json:"method"`
+	RequestId         string      `json:"request_id"`
+	Parameters        interface{} `json:"parameters"`
+	ExpiresAt         time.Time   `json:"expires_at"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdateAt          time.Time   `json:"updated_at"`
 }
 
 type CallRequestSpecification struct {
 	Caller     string      `json:"caller"`
 	Method     string      `json:"method"`
+	RequestId  string      `json:"request_id"`
 	Parameters interface{} `json:"parameters"`
 }
 
@@ -51,7 +53,6 @@ type CreateCallRequestsRequest struct {
 
 type DropperCallRequestParameters struct {
 	DropId        string `json:"dropId"`
-	RequestID     string `json:"requestID"`
 	BlockDeadline string `json:"blockDeadline"`
 	Amount        string `json:"amount"`
 	Signer        string `json:"signer"`
@@ -142,11 +143,11 @@ func (client *MoonstreamEngineAPIClient) ListRegisteredContracts(blockchain, add
 	return contracts, nil
 }
 
-func (client *MoonstreamEngineAPIClient) ListCallRequests(contractId, contractAddress, caller string, limit, offset int) ([]CallRequest, error) {
+func (client *MoonstreamEngineAPIClient) ListCallRequests(contractId, contractAddress, caller string, limit, offset int, showExpired bool) ([]CallRequest, error) {
 	var callRequests []CallRequest
 
 	if caller == "" {
-		return callRequests, fmt.Errorf("You must specify caller when listing call requests")
+		return callRequests, fmt.Errorf("you must specify caller when listing call requests")
 	}
 
 	request, requestCreationErr := http.NewRequest("GET", fmt.Sprintf("%s/metatx/requests", client.BaseURL), nil)
@@ -167,6 +168,7 @@ func (client *MoonstreamEngineAPIClient) ListCallRequests(contractId, contractAd
 	queryParameters.Add("caller", caller)
 	queryParameters.Add("limit", strconv.Itoa(limit))
 	queryParameters.Add("offset", strconv.Itoa(offset))
+	queryParameters.Add("show_expired", strconv.FormatBool(showExpired))
 
 	request.URL.RawQuery = queryParameters.Encode()
 

@@ -393,6 +393,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 
 	var blockchain, address, contractType, contractId, contractAddress, infile string
 	var limit, offset, batchSize int
+	var showExpired bool
 
 	contractsSubcommand := &cobra.Command{
 		Use:   "contracts",
@@ -427,7 +428,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 				return clientErr
 			}
 
-			callRequests, err := client.ListCallRequests(contractId, contractAddress, address, limit, offset)
+			callRequests, err := client.ListCallRequests(contractId, contractAddress, address, limit, offset, showExpired)
 			if err != nil {
 				return err
 			}
@@ -441,6 +442,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 	callRequestsSubcommand.Flags().StringVar(&address, "caller", "", "Address of caller")
 	callRequestsSubcommand.Flags().IntVar(&limit, "limit", 100, "Limit")
 	callRequestsSubcommand.Flags().IntVar(&offset, "offset", 0, "Offset")
+	callRequestsSubcommand.Flags().BoolVar(&showExpired, "show-expired", false, "Specify this flag to show expired call requests")
 
 	createCallRequestsSubcommand := &cobra.Command{
 		Use:   "drop",
@@ -475,11 +477,11 @@ func CreateMoonstreamCommand() *cobra.Command {
 			callRequests := make([]CallRequestSpecification, len(messages))
 			for i, message := range messages {
 				callRequests[i] = CallRequestSpecification{
-					Caller: message.Claimant,
-					Method: "claim",
+					Caller:    message.Claimant,
+					Method:    "claim",
+					RequestId: message.RequestID,
 					Parameters: DropperCallRequestParameters{
 						DropId:        message.DropId,
-						RequestID:     message.RequestID,
 						BlockDeadline: message.BlockDeadline,
 						Amount:        message.Amount,
 						Signer:        message.Signer,

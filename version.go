@@ -1,3 +1,3 @@
 package main
 
-var WAGGLE_VERSION string = "0.0.7"
+var WAGGLE_VERSION string = "0.0.8"

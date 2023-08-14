@@ -46,7 +46,7 @@ func WriteCursorToJournal(client *bugout.BugoutClient, token, journalID, cursorN
 	tags := []string{
 		"type:cursor",
 		fmt.Sprintf("cursor:%s", cursorName),
-		fmt.Sprintf("waggle_version:%s", WAGGLE_VERSION),
+		fmt.Sprintf("waggle_version:%s", WaggleVersion()),
 	}
 	content := fmt.Sprintf("Cursor: %s at %s\nQuery: %s", cursorName, cursor, queryTerms)
 	_, err := client.Spire.CreateEntry(token, journalID, title, content, tags, entryContext)

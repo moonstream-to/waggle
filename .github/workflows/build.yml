@@ -1,0 +1,15 @@
+name: Build waggle command-line tool
+
+on: [pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: ^1.20.0
+      - name: Build waggle binary
+        run: |
+          go build -o waggle ./...

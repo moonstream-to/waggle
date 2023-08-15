@@ -6,15 +6,15 @@
 2. Manage signing accounts
 3. Send drop claims to the Moonstream Engine API
 
-### Installation
+## Installation
 
-```
+```bash
 go install github.com/moonstream-to/waggle@latest
 ```
 
-### Usage
+## Usage as CLI
 
-```
+```bash
 waggle -h
 ```
 
@@ -22,7 +22,7 @@ waggle -h
 
 You can import a signing account from an external wallet using its private key:
 
-```
+```bash
 waggle accounts import -k <path at which to save keystore file>
 ```
 
@@ -63,34 +63,34 @@ claims (`batch.json` below):
 
 ```json
 [
-  {
-    "dropId": "2",
-    "requestID": "5",
-    "claimant": "0x000000000000000000000000000000000000dEaD",
-    "blockDeadline": "40000000",
-    "amount": "3000000000000000000"
-  },
-  {
-    "dropId": "2",
-    "requestID": "6",
-    "claimant": "0x000000000000000000000000000000000000dEaD",
-    "blockDeadline": "40000000",
-    "amount": "3000000000000000000"
-  },
-  {
-    "dropId": "2",
-    "requestID": "7",
-    "claimant": "0x000000000000000000000000000000000000dEaD",
-    "blockDeadline": "40000000",
-    "amount": "3000000000000000000"
-  },
-  {
-    "dropId": "2",
-    "requestID": "8",
-    "claimant": "0x000000000000000000000000000000000000dEaD",
-    "blockDeadline": "40000000",
-    "amount": "3000000000000000000"
-  }
+	{
+		"dropId": "2",
+		"requestID": "5",
+		"claimant": "0x000000000000000000000000000000000000dEaD",
+		"blockDeadline": "40000000",
+		"amount": "3000000000000000000"
+	},
+	{
+		"dropId": "2",
+		"requestID": "6",
+		"claimant": "0x000000000000000000000000000000000000dEaD",
+		"blockDeadline": "40000000",
+		"amount": "3000000000000000000"
+	},
+	{
+		"dropId": "2",
+		"requestID": "7",
+		"claimant": "0x000000000000000000000000000000000000dEaD",
+		"blockDeadline": "40000000",
+		"amount": "3000000000000000000"
+	},
+	{
+		"dropId": "2",
+		"requestID": "8",
+		"claimant": "0x000000000000000000000000000000000000dEaD",
+		"blockDeadline": "40000000",
+		"amount": "3000000000000000000"
+	}
 ]
 ```
 
@@ -108,42 +108,42 @@ This results in a file that looks like this:
 
 ```json
 [
-  {
-    "dropId": "2",
-    "requestID": "5",
-    "claimant": "0x000000000000000000000000000000000000dEaD",
-    "blockDeadline": "40000000",
-    "amount": "3000000000000000000",
-    "signature": "408...",
-    "signer": "<redacted Ethereum address>"
-  },
-  {
-    "dropId": "2",
-    "requestID": "6",
-    "claimant": "0x000000000000000000000000000000000000dEaD",
-    "blockDeadline": "40000000",
-    "amount": "3000000000000000000",
-    "signature": "667...",
-    "signer": "<redacted Ethereum address>"
-  },
-  {
-    "dropId": "2",
-    "requestID": "7",
-    "claimant": "0x000000000000000000000000000000000000dEaD",
-    "blockDeadline": "40000000",
-    "amount": "3000000000000000000",
-    "signature": "5c6...",
-    "signer": "<redacted Ethereum address>"
-  },
-  {
-    "dropId": "2",
-    "requestID": "8",
-    "claimant": "0x000000000000000000000000000000000000dEaD",
-    "blockDeadline": "40000000",
-    "amount": "3000000000000000000",
-    "signature": "85f...",
-    "signer": "<redacted Ethereum address>"
-  }
+	{
+		"dropId": "2",
+		"requestID": "5",
+		"claimant": "0x000000000000000000000000000000000000dEaD",
+		"blockDeadline": "40000000",
+		"amount": "3000000000000000000",
+		"signature": "408...",
+		"signer": "<redacted Ethereum address>"
+	},
+	{
+		"dropId": "2",
+		"requestID": "6",
+		"claimant": "0x000000000000000000000000000000000000dEaD",
+		"blockDeadline": "40000000",
+		"amount": "3000000000000000000",
+		"signature": "667...",
+		"signer": "<redacted Ethereum address>"
+	},
+	{
+		"dropId": "2",
+		"requestID": "7",
+		"claimant": "0x000000000000000000000000000000000000dEaD",
+		"blockDeadline": "40000000",
+		"amount": "3000000000000000000",
+		"signature": "5c6...",
+		"signer": "<redacted Ethereum address>"
+	},
+	{
+		"dropId": "2",
+		"requestID": "8",
+		"claimant": "0x000000000000000000000000000000000000dEaD",
+		"blockDeadline": "40000000",
+		"amount": "3000000000000000000",
+		"signature": "85f...",
+		"signer": "<redacted Ethereum address>"
+	}
 ]
 ```
 
@@ -160,7 +160,7 @@ You can generate an access token at https://moonstream.to/app
 
 Then:
 
-```
+```bash
 waggle moonstream drop \
     --contract-id a035f3f8-7301-45b7-940a-109585419774 \
     --infile signed_batch.json
@@ -183,10 +183,9 @@ https://engineapi.moonstream.to/contracts/requests?contract_id=$CONTRACT_ID&call
 Here, `$CONTRACT_ID` should be the same contract ID you used in `waggle moonstream drop`. `$USER_ADDRESS`
 is the user's Ethereum account address.
 
-
 #### Get claim requests from Bugout journal
 
-```
+```bash
 waggle sign dropper pull \
   --cursor <cursor name> \
   -j <Bugout Journal ID> \
@@ -196,7 +195,7 @@ waggle sign dropper pull \
 This expects a `BUGOUT_ACCESS_TOKEN` environment variable to be set. You can generate an access token
 at https://bugout.dev/account/tokens. Once you have generated a token, set it in your shell session using:
 
-```
+```bash
 export BUGOUT_ACCESS_TOKEN=<token>
 ```
 
@@ -215,7 +214,7 @@ dropId,requestID,claimant,blockDeadline,amount,signer,signature
 You can sign this using the `waggle sign dropper batch command` by passing the CSV file as the `--infile`
 argument and setting the `--csv` flag:
 
-```
+```bash
 waggle sign dropper batch -k signer.json \
     --chain-id 80001 \
     --dropper 0x4ec36E288E1b5d6914851a141cb041152Cf95328 \
@@ -227,13 +226,38 @@ waggle sign dropper batch -k signer.json \
 
 ### Build
 
-```
+```bash
 go build ./...
 ./waggle -h
 ```
 
 ### Test
 
-```
+```bash
 go test ./... -v
+```
+
+## Usage as API server
+
+Example of server configuration file `config.json`:
+
+```json
+[
+	{
+		"keyfile_path": "dev.json",
+		"keyfile_password_path": "password.txt"
+	}
+]
+```
+
+Config also could be generated with command:
+
+```bash
+waggle accounts config --keyfile dev.json --outfile config.json
+```
+
+Run server:
+
+```bash
+waggle server run --host 0.0.0.0 --config config.json
 ```

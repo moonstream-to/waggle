@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
 	bugout "github.com/bugout-dev/bugout-go/pkg"
@@ -33,7 +34,8 @@ func CreateRootCommand() *cobra.Command {
 	signCmd := CreateSignCommand()
 	accountsCmd := CreateAccountsCommand()
 	moonstreamCommand := CreateMoonstreamCommand()
-	rootCmd.AddCommand(versionCmd, signCmd, accountsCmd, moonstreamCommand)
+	serverCommand := CreateServerCommand()
+	rootCmd.AddCommand(versionCmd, signCmd, accountsCmd, moonstreamCommand, serverCommand)
 
 	completionCmd := CreateCompletionCommand(rootCmd)
 	rootCmd.AddCommand(completionCmd)
@@ -503,4 +505,53 @@ func CreateMoonstreamCommand() *cobra.Command {
 	moonstreamCommand.AddCommand(contractsSubcommand, callRequestsSubcommand, createCallRequestsSubcommand)
 
 	return moonstreamCommand
+}
+
+func CreateServerCommand() *cobra.Command {
+	serverCommand := &cobra.Command{
+		Use:   "server",
+		Short: "API of signing and registration of call requests",
+	}
+
+	var host, config string
+	var port int
+	runSubcommand := &cobra.Command{
+		Use:   "run",
+		Short: "Run API server.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configs, err := ReadServerConfig(config)
+			if err != nil {
+				return err
+			}
+			if len(*configs) == 0 {
+				return fmt.Errorf("no signers available")
+			}
+
+			availableSigners = make(map[string]AvailableSigner)
+			for _, c := range *configs {
+				passwordRaw, err := os.ReadFile(c.KeyfilePasswordPath)
+				if err != nil {
+					return err
+				}
+				key, keyErr := KeyFromFile(c.KeyfilePath, string(passwordRaw))
+				if keyErr != nil {
+					return keyErr
+				}
+				availableSigners[key.Address.String()] = AvailableSigner{
+					key: key,
+				}
+				log.Printf("Loaded signer %s", key.Address.String())
+			}
+
+			err = ServerRun(host, port)
+			return err
+		},
+	}
+	runSubcommand.Flags().StringVar(&host, "host", "127.0.0.1", "Server listening address")
+	runSubcommand.Flags().IntVar(&port, "port", 7379, "Server listening port")
+	runSubcommand.Flags().StringVar(&config, "config", "./config.json", "Path to server configuration file")
+
+	serverCommand.AddCommand(runSubcommand)
+
+	return serverCommand
 }

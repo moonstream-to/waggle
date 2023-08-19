@@ -15,9 +15,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref }}
-          release_name: "Waggle Go client - ${{ github.ref }}"
+          release_name: "Waggle ${{ github.ref_name }}"
           body: |
-            Version ${{ github.ref }} of the Waggle Go client library and command line tool
+            Version ${{ github.ref_name }} of the Waggle library and command line tool
           draft: true
           prerelease: false
     outputs:
@@ -42,19 +42,19 @@ jobs:
       - uses: actions/setup-go@v2
         with:
           go-version: ^1.20.0
-      - name: Set version in environment variable
-        id: waggle-version
-        run: |
-          echo "WAGGLE_VERSION=$(cat version.txt)" >> $GITHUB_ENV
       - name: Build binary for each valid (GOOS, GOARCH) pair
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
         run: |
-          BUILD_DIR="waggle-${WAGGLE_VERSION}-${GOOS}-${GOARCH}"
+          BUILD_DIR="waggle-${{ github.ref_name }}-${GOOS}-${GOARCH}"
+          EXTENSION=""
+          if [ "$GOOS" = "windows" ]; then
+            EXTENSION=".exe"
+          fi
           mkdir "$BUILD_DIR"
           cp README.md "$BUILD_DIR/README.md"
-          go build -o "$BUILD_DIR/waggle" ./...
+          go build -o "$BUILD_DIR/waggle${EXTENSION}" ./...
           zip -r "$BUILD_DIR.zip" "$BUILD_DIR"
       - name: Upload release asset for each valid (GOOS, GOARH) pair
         uses: actions/upload-release-asset@v1
@@ -62,6 +62,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ./waggle-${WAGGLE_VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip
-          asset_name: waggle-${WAGGLE_VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip
+          asset_path: ./waggle-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.zip
+          asset_name: waggle-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.zip
           asset_content_type: application/zip

@@ -101,7 +101,7 @@ func CreateVersionCommand() *cobra.Command {
 		Short: "Print the version number of waggle",
 		Long:  `All software has versions. This is waggle's`,
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println(WaggleVersion())
+			cmd.Println(WAGGLE_VERSION)
 		},
 	}
 	return versionCmd

@@ -58,6 +58,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ./waggle-${WAGGLE_VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip
-          asset_name: waggle-${WAGGLE_VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip
+          asset_path: ./waggle-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.zip
+          asset_name: waggle-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.arch }}.zip
           asset_content_type: application/zip

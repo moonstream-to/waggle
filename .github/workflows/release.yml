@@ -47,8 +47,7 @@ jobs:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
         run: |
-          WAGGLE_VERSION=$(go run ./... version)
-          BUILD_DIR="waggle-${WAGGLE_VERSION}-${GOOS}-${GOARCH}"
+          BUILD_DIR="waggle-${{ github.ref }}-${GOOS}-${GOARCH}"
           mkdir "$BUILD_DIR"
           cp README.md "$BUILD_DIR/README.md"
           go build -o "$BUILD_DIR/waggle" ./...

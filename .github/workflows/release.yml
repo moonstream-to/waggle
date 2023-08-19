@@ -15,9 +15,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref }}
-          release_name: "Waggle Go client - ${{ github.ref }}"
+          release_name: "Waggle ${{ github.ref_name }}"
           body: |
-            Version ${{ github.ref }} of the Waggle Go client library and command line tool
+            Version ${{ github.ref_name }} of the Waggle library and command line tool
           draft: true
           prerelease: false
     outputs:
@@ -47,7 +47,7 @@ jobs:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
         run: |
-          BUILD_DIR="waggle-${{ github.ref }}-${GOOS}-${GOARCH}"
+          BUILD_DIR="waggle-${{ github.ref_name }}-${GOOS}-${GOARCH}"
           mkdir "$BUILD_DIR"
           cp README.md "$BUILD_DIR/README.md"
           go build -o "$BUILD_DIR/waggle" ./...

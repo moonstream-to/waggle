@@ -16,16 +16,33 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-var (
-	availableSigners map[string]AvailableSigner
-)
-
 type AvailableSigner struct {
 	key *keystore.Key
 }
 
+type Server struct {
+	Host             string
+	Port             int
+	AvailableSigners map[string]AvailableSigner
+	LogLevel         int
+	CORSWhitelist    map[string]bool
+}
+
+type PingResponse struct {
+	Status string `json:"status"`
+}
+
+type SignDropperRequest struct {
+	ChainId  int                    `json:"chain_id"`
+	Dropper  string                 `json:"dropper"`
+	Signer   string                 `json:"signer"`
+	Sensible bool                   `json:"sensible"`
+	Requests []*DropperClaimMessage `json:"requests"`
+}
+
 // CORS middleware
-func corsMiddleware(next http.Handler) http.Handler {
+// TODO: Use server.CORSWhitelist (check wildcard first).
+func (server *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
 			for _, allowedOrigin := range strings.Split(WAGGLE_CORS_ALLOWED_ORIGINS, ",") {
@@ -45,7 +62,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 // Log access requests in proper format
-func logMiddleware(next http.Handler) http.Handler {
+// TODO: User server.LogLevel.
+func (server *Server) logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
@@ -76,7 +94,7 @@ func logMiddleware(next http.Handler) http.Handler {
 }
 
 // Handle panic errors to prevent server shutdown
-func panicMiddleware(next http.Handler) http.Handler {
+func (server *Server) panicMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -90,27 +108,16 @@ func panicMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-type PingResponse struct {
-	Status string `json:"status"`
-}
-
 // pingRoute response with status of load balancer server itself
-func pingRoute(w http.ResponseWriter, r *http.Request) {
+func (server *Server) pingRoute(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	response := PingResponse{Status: "ok"}
 	json.NewEncoder(w).Encode(response)
 }
 
-type SignDropperRequest struct {
-	ChainId  int                    `json:"chain_id"`
-	Dropper  string                 `json:"dropper"`
-	Signer   string                 `json:"signer"`
-	Sensible bool                   `json:"sensible"`
-	Requests []*DropperClaimMessage `json:"requests"`
-}
-
 // signDropperRoute response with status of load balancer server itself
-func signDropperRoute(w http.ResponseWriter, r *http.Request) {
+// TODO: Use server.AvailableSigners
+func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Unable to read body", http.StatusBadRequest)
@@ -129,7 +136,7 @@ func signDropperRoute(w http.ResponseWriter, r *http.Request) {
 
 	// Check if server can sign with provided signer address
 	var chosenSigner string
-	for addr := range availableSigners {
+	for addr := range server.AvailableSigners {
 		if addr == common.HexToAddress(req.Signer).String() {
 			chosenSigner = addr
 		}
@@ -146,31 +153,32 @@ func signDropperRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		signedMessage, signatureErr := SignRawMessage(messageHash, availableSigners[chosenSigner].key, req.Sensible)
+		signedMessage, signatureErr := SignRawMessage(messageHash, server.AvailableSigners[chosenSigner].key, req.Sensible)
 		if signatureErr != nil {
 			http.Error(w, "Unable to sign message", http.StatusInternalServerError)
 			return
 		}
 
 		message.Signature = hex.EncodeToString(signedMessage)
-		message.Signer = availableSigners[chosenSigner].key.Address.Hex()
+		message.Signer = server.AvailableSigners[chosenSigner].key.Address.Hex()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(req)
 }
 
-func Serve(host string, port int) error {
+// TODO: Remove host and port arguments- these should be read from server.Host, server.Port.
+func (server *Server) Serve(host string, port int) error {
 	serveMux := http.NewServeMux()
-	serveMux.HandleFunc("/ping", pingRoute)
-	serveMux.HandleFunc("/sign/dropper", signDropperRoute)
+	serveMux.HandleFunc("/ping", server.pingRoute)
+	serveMux.HandleFunc("/sign/dropper", server.signDropperRoute)
 
 	// Set list of common middleware, from bottom to top
-	commonHandler := corsMiddleware(serveMux)
-	commonHandler = logMiddleware(commonHandler)
-	commonHandler = panicMiddleware(commonHandler)
+	commonHandler := server.corsMiddleware(serveMux)
+	commonHandler = server.logMiddleware(commonHandler)
+	commonHandler = server.panicMiddleware(commonHandler)
 
-	server := http.Server{
+	s := http.Server{
 		Addr:         fmt.Sprintf("%s:%d", host, port),
 		Handler:      commonHandler,
 		ReadTimeout:  40 * time.Second,
@@ -178,7 +186,7 @@ func Serve(host string, port int) error {
 	}
 
 	log.Printf("Starting node load balancer HTTP server at %s:%d", host, port)
-	err := server.ListenAndServe()
+	err := s.ListenAndServe()
 	if err != nil {
 		return fmt.Errorf("failed to start server listener, err: %v", err)
 	}

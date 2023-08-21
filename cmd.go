@@ -530,7 +530,7 @@ func CreateServerCommand() *cobra.Command {
 				return fmt.Errorf("no signers available")
 			}
 
-			availableSigners = make(map[string]AvailableSigner)
+			availableSigners := make(map[string]AvailableSigner)
 			for _, c := range *configs {
 				passwordRaw, err := os.ReadFile(c.KeyfilePasswordPath)
 				if err != nil {
@@ -546,7 +546,9 @@ func CreateServerCommand() *cobra.Command {
 				log.Printf("Loaded signer %s", key.Address.String())
 			}
 
-			err = Serve(host, port)
+			server := Server{Host: host, Port: port, AvailableSigners: availableSigners}
+
+			err = server.Serve(host, port)
 			return err
 		},
 	}

@@ -160,7 +160,7 @@ func signDropperRoute(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(req)
 }
 
-func ServerRun(host string, port int) error {
+func Serve(host string, port int) error {
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/ping", pingRoute)
 	serveMux.HandleFunc("/sign/dropper", signDropperRoute)

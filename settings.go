@@ -24,7 +24,7 @@ type ServerSignerConfig struct {
 }
 
 // ReadConfig parses list of configuration file paths to list of Application Probes configs
-func ReadServerConfig(rawConfigPath string) (*[]ServerSignerConfig, error) {
+func ReadServerSignerConfig(rawConfigPath string) (*[]ServerSignerConfig, error) {
 	var configs []ServerSignerConfig
 
 	configPath := strings.TrimSuffix(rawConfigPath, "/")

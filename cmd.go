@@ -131,63 +131,7 @@ func CreateAccountsCommand() *cobra.Command {
 		},
 	}
 
-	var password, outfile string
-
-	configCommand := &cobra.Command{
-		Use:   "config",
-		Short: "Prepare configuration for waggle API server.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			serverSignerConfigs := []ServerSignerConfig{}
-			var passwordRaw []byte
-			var err error
-			if password == "" {
-				fmt.Print("Enter password for keyfile (it will not be displayed on screen): ")
-				passwordRaw, err = term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Print("\n")
-				if err != nil {
-					return fmt.Errorf("error reading password from input: %s", err.Error())
-				}
-			} else {
-				passwordRaw = []byte(password)
-			}
-
-			keyfilePath := strings.TrimSuffix(keyfile, "/")
-			_, err = os.Stat(keyfilePath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					return fmt.Errorf("file %s not found, err: %v", keyfilePath, err)
-				}
-				return fmt.Errorf("error due checking keyfile path %s, err: %v", keyfilePath, err)
-			}
-			dir, file := filepath.Split(keyfilePath)
-			passwordFilePath := fmt.Sprintf("%spassword-%s", dir, file)
-			os.WriteFile(passwordFilePath, passwordRaw, 0640)
-
-			// TODO(kompotkot): Provide functionality to generate config with multiple keyfiles
-			serverSignerConfigs = append(serverSignerConfigs, ServerSignerConfig{
-				KeyfilePath:         keyfile,
-				KeyfilePasswordPath: passwordFilePath,
-			})
-			resultJSON, err := json.Marshal(serverSignerConfigs)
-			if err != nil {
-				return err
-			}
-
-			if outfile != "" {
-				os.WriteFile(outfile, resultJSON, 0644)
-			} else {
-				os.Stdout.Write(resultJSON)
-			}
-
-			return nil
-		},
-	}
-
-	configCommand.PersistentFlags().StringVarP(&keyfile, "keystore", "k", "", "Path to keystore file (this should be a JSON file)")
-	configCommand.PersistentFlags().StringVarP(&password, "password", "p", "", "Password for keystore file. If not provided, you will be prompted for it when you sign with the key")
-	configCommand.PersistentFlags().StringVarP(&outfile, "outfile", "o", "config.json", "Config file output path")
-
-	accountsCommand.AddCommand(importCommand, configCommand)
+	accountsCommand.AddCommand(importCommand)
 
 	return accountsCommand
 }
@@ -578,7 +522,7 @@ func CreateServerCommand() *cobra.Command {
 		Use:   "run",
 		Short: "Run API server.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configs, err := ReadServerConfig(config)
+			configs, err := ReadServerSignerConfig(config)
 			if err != nil {
 				return err
 			}
@@ -602,7 +546,7 @@ func CreateServerCommand() *cobra.Command {
 				log.Printf("Loaded signer %s", key.Address.String())
 			}
 
-			err = ServerRun(host, port)
+			err = Serve(host, port)
 			return err
 		},
 	}
@@ -610,7 +554,63 @@ func CreateServerCommand() *cobra.Command {
 	runSubcommand.Flags().IntVar(&port, "port", 7379, "Server listening port")
 	runSubcommand.Flags().StringVar(&config, "config", "./config.json", "Path to server configuration file")
 
-	serverCommand.AddCommand(runSubcommand)
+	var keyfile, password, outfile string
+
+	configureCommand := &cobra.Command{
+		Use:   "configure",
+		Short: "Prepare configuration for waggle API server.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			serverSignerConfigs := []ServerSignerConfig{}
+			var passwordRaw []byte
+			var err error
+			if password == "" {
+				fmt.Print("Enter password for keyfile (it will not be displayed on screen): ")
+				passwordRaw, err = term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Print("\n")
+				if err != nil {
+					return fmt.Errorf("error reading password from input: %s", err.Error())
+				}
+			} else {
+				passwordRaw = []byte(password)
+			}
+
+			keyfilePath := strings.TrimSuffix(keyfile, "/")
+			_, err = os.Stat(keyfilePath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("file %s not found, err: %v", keyfilePath, err)
+				}
+				return fmt.Errorf("error due checking keyfile path %s, err: %v", keyfilePath, err)
+			}
+			dir, file := filepath.Split(keyfilePath)
+			passwordFilePath := fmt.Sprintf("%spassword-%s", dir, file)
+			os.WriteFile(passwordFilePath, passwordRaw, 0640)
+
+			// TODO(kompotkot): Provide functionality to generate config with multiple keyfiles
+			serverSignerConfigs = append(serverSignerConfigs, ServerSignerConfig{
+				KeyfilePath:         keyfile,
+				KeyfilePasswordPath: passwordFilePath,
+			})
+			resultJSON, err := json.Marshal(serverSignerConfigs)
+			if err != nil {
+				return err
+			}
+
+			if outfile != "" {
+				os.WriteFile(outfile, resultJSON, 0644)
+			} else {
+				os.Stdout.Write(resultJSON)
+			}
+
+			return nil
+		},
+	}
+
+	configureCommand.PersistentFlags().StringVarP(&keyfile, "keystore", "k", "", "Path to keystore file (this should be a JSON file)")
+	configureCommand.PersistentFlags().StringVarP(&password, "password", "p", "", "Password for keystore file. If not provided, you will be prompted for it when you sign with the key")
+	configureCommand.PersistentFlags().StringVarP(&outfile, "outfile", "o", "config.json", "Config file output path")
+
+	serverCommand.AddCommand(runSubcommand, configureCommand)
 
 	return serverCommand
 }

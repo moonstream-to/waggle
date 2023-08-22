@@ -5,11 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -41,18 +40,26 @@ type SignDropperRequest struct {
 }
 
 // CORS middleware
-// TODO: Use server.CORSWhitelist (check wildcard first).
 func (server *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
-			for _, allowedOrigin := range strings.Split(WAGGLE_CORS_ALLOWED_ORIGINS, ",") {
-				if r.Header.Get("Origin") == allowedOrigin {
-					w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-					w.Header().Set("Access-Control-Allow-Methods", "GET,POST")
-					// Credentials are cookies, authorization headers, or TLS client certificates
-					w.Header().Set("Access-Control-Allow-Credentials", "true")
-					w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			var allowedOrigin string
+			if server.CORSWhitelist["*"] {
+				allowedOrigin = "*"
+			} else {
+				for o := range server.CORSWhitelist {
+					if r.Header.Get("Origin") == o {
+						allowedOrigin = o
+					}
 				}
+			}
+			// If origin in list of CORS allowed origins, extend with required headers
+			if allowedOrigin != "" {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+				w.Header().Set("Access-Control-Allow-Methods", "GET,POST")
+				// Credentials are cookies, authorization headers, or TLS client certificates
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -62,15 +69,14 @@ func (server *Server) corsMiddleware(next http.Handler) http.Handler {
 }
 
 // Log access requests in proper format
-// TODO: User server.LogLevel.
 func (server *Server) logMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := ioutil.ReadAll(r.Body)
-		if err != nil {
+		body, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
 			http.Error(w, "Unable to read body", http.StatusBadRequest)
 			return
 		}
-		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+		r.Body = io.NopCloser(bytes.NewBuffer(body))
 		if len(body) > 0 {
 			defer r.Body.Close()
 		}
@@ -78,10 +84,11 @@ func (server *Server) logMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 
 		var ip string
+		var splitErr error
 		realIp := r.Header["X-Real-Ip"]
 		if len(realIp) == 0 {
-			ip, _, err = net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
+			ip, _, splitErr = net.SplitHostPort(r.RemoteAddr)
+			if splitErr != nil {
 				http.Error(w, fmt.Sprintf("Unable to parse client IP: %s", r.RemoteAddr), http.StatusBadRequest)
 				return
 			}
@@ -89,6 +96,12 @@ func (server *Server) logMiddleware(next http.Handler) http.Handler {
 			ip = realIp[0]
 		}
 		logStr := fmt.Sprintf("%s %s %s", ip, r.Method, r.URL.Path)
+
+		if server.LogLevel >= 2 {
+			if r.URL.RawQuery != "" {
+				logStr += fmt.Sprintf(" %s", r.URL.RawQuery)
+			}
+		}
 		log.Printf("%s\n", logStr)
 	})
 }
@@ -97,8 +110,8 @@ func (server *Server) logMiddleware(next http.Handler) http.Handler {
 func (server *Server) panicMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if err := recover(); err != nil {
-				log.Println("recovered", err)
+			if recoverErr := recover(); recoverErr != nil {
+				log.Println("recovered", recoverErr)
 				http.Error(w, "Internal server error", 500)
 			}
 		}()
@@ -116,20 +129,19 @@ func (server *Server) pingRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 // signDropperRoute response with status of load balancer server itself
-// TODO: Use server.AvailableSigners
 func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
+	body, readErr := io.ReadAll(r.Body)
+	if readErr != nil {
 		http.Error(w, "Unable to read body", http.StatusBadRequest)
 		return
 	}
-	r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
 	if len(body) > 0 {
 		defer r.Body.Close()
 	}
 	var req *SignDropperRequest
-	err = json.Unmarshal(body, &req)
-	if err != nil {
+	parseErr := json.Unmarshal(body, &req)
+	if parseErr != nil {
 		http.Error(w, "Unable to parse body", http.StatusBadRequest)
 		return
 	}
@@ -167,8 +179,8 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(req)
 }
 
-// TODO: Remove host and port arguments- these should be read from server.Host, server.Port.
-func (server *Server) Serve(host string, port int) error {
+// Serve handles server run
+func (server *Server) Serve() error {
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/ping", server.pingRoute)
 	serveMux.HandleFunc("/sign/dropper", server.signDropperRoute)
@@ -179,16 +191,16 @@ func (server *Server) Serve(host string, port int) error {
 	commonHandler = server.panicMiddleware(commonHandler)
 
 	s := http.Server{
-		Addr:         fmt.Sprintf("%s:%d", host, port),
+		Addr:         fmt.Sprintf("%s:%d", server.Host, server.Port),
 		Handler:      commonHandler,
 		ReadTimeout:  40 * time.Second,
 		WriteTimeout: 40 * time.Second,
 	}
 
-	log.Printf("Starting node load balancer HTTP server at %s:%d", host, port)
-	err := s.ListenAndServe()
-	if err != nil {
-		return fmt.Errorf("failed to start server listener, err: %v", err)
+	log.Printf("Starting node load balancer HTTP server at %s:%d", server.Host, server.Port)
+	sErr := s.ListenAndServe()
+	if sErr != nil {
+		return fmt.Errorf("failed to start server listener, err: %v", sErr)
 	}
 
 	return nil

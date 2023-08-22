@@ -517,14 +517,14 @@ func CreateServerCommand() *cobra.Command {
 	}
 
 	var host, config string
-	var port int
+	var port, logLevel int
 	runSubcommand := &cobra.Command{
 		Use:   "run",
 		Short: "Run API server.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configs, err := ReadServerSignerConfig(config)
-			if err != nil {
-				return err
+			configs, configsErr := ReadServerSignerConfig(config)
+			if configsErr != nil {
+				return configsErr
 			}
 			if len(*configs) == 0 {
 				return fmt.Errorf("no signers available")
@@ -532,9 +532,9 @@ func CreateServerCommand() *cobra.Command {
 
 			availableSigners := make(map[string]AvailableSigner)
 			for _, c := range *configs {
-				passwordRaw, err := os.ReadFile(c.KeyfilePasswordPath)
-				if err != nil {
-					return err
+				passwordRaw, readErr := os.ReadFile(c.KeyfilePasswordPath)
+				if readErr != nil {
+					return readErr
 				}
 				key, keyErr := KeyFromFile(c.KeyfilePath, string(passwordRaw))
 				if keyErr != nil {
@@ -545,16 +545,26 @@ func CreateServerCommand() *cobra.Command {
 				}
 				log.Printf("Loaded signer %s", key.Address.String())
 			}
+			corsWhitelist := make(map[string]bool)
+			for _, o := range strings.Split(WAGGLE_CORS_ALLOWED_ORIGINS, ",") {
+				corsWhitelist[o] = true
+			}
 
-			server := Server{Host: host, Port: port, AvailableSigners: availableSigners}
+			server := Server{
+				Host:             host,
+				Port:             port,
+				AvailableSigners: availableSigners,
+				CORSWhitelist:    corsWhitelist,
+			}
 
-			err = server.Serve(host, port)
-			return err
+			serveErr := server.Serve()
+			return serveErr
 		},
 	}
 	runSubcommand.Flags().StringVar(&host, "host", "127.0.0.1", "Server listening address")
 	runSubcommand.Flags().IntVar(&port, "port", 7379, "Server listening port")
 	runSubcommand.Flags().StringVar(&config, "config", "./config.json", "Path to server configuration file")
+	runSubcommand.Flags().IntVar(&logLevel, "log-level", 1, "Log verbosity level")
 
 	var keyfile, password, outfile string
 

@@ -55,7 +55,7 @@ func (server *Server) corsMiddleware(next http.Handler) http.Handler {
 			}
 			// If origin in list of CORS allowed origins, extend with required headers
 			if allowedOrigin != "" {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
+				w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 				w.Header().Set("Access-Control-Allow-Methods", "GET,POST")
 				// Credentials are cookies, authorization headers, or TLS client certificates
 				w.Header().Set("Access-Control-Allow-Credentials", "true")

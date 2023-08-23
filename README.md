@@ -237,9 +237,37 @@ go build ./...
 go test ./... -v
 ```
 
-## Usage as API server
+## Waggle API Server Extension
 
-Example of server configuration file `config.json`:
+The Waggle API Server Extension is designed to offer a RESTfull API access for `waggle` functionalities. It builds over existing waggle features, enhancing operational efficiency and automating routine tasks.
+
+Executes `sign dropper` functionalities such as certifying drop claims for Dropper v0.2.0 by sending POST requests:
+
+```json
+{
+	"chain_id": 80001,
+	"dropper": "0x4ec36E288E1b5d6914851a141cb041152Cf95328",
+	"signer": "0x629c51488a18fc75f4b8993743f3c132316951c9",
+	"requests": [
+		{
+			"dropId": "2",
+			"requestID": "5",
+			"claimant": "0x000000000000000000000000000000000000dEaD",
+			"blockDeadline": "40000000",
+			"amount": "3000000000000000000"
+		},
+		{
+			"dropId": "2",
+			"requestID": "6",
+			"claimant": "0x000000000000000000000000000000000000dEaD",
+			"blockDeadline": "40000000",
+			"amount": "3000000000000000000"
+		}
+	]
+}
+```
+
+With configuration file you can specify list of signers and sign drops with chosen one. Example of server configuration file `config.json`:
 
 ```json
 [
@@ -253,7 +281,7 @@ Example of server configuration file `config.json`:
 Config also could be generated with command:
 
 ```bash
-waggle accounts config --keyfile dev.json --outfile config.json
+waggle server configure --keyfile dev.json --outfile config.json
 ```
 
 Run server:

@@ -147,7 +147,7 @@ func CreateSignCommand() *cobra.Command {
 	var chainId int64
 	var batchSize int
 	var bugoutToken, cursorName, journalID, keyfile, password, claimant, dropperAddress, dropId, requestId, blockDeadline, amount, infile, outfile, query string
-	var sensible, header, isCSV bool
+	var sensible, hashFlag, isCSV, header bool
 
 	signCommand.PersistentFlags().StringVarP(&keyfile, "keystore", "k", "", "Path to keystore file (this should be a JSON file).")
 	signCommand.PersistentFlags().StringVarP(&password, "password", "p", "", "Password for keystore file. If not provided, you will be prompted for it when you sign with the key.")
@@ -208,7 +208,7 @@ func CreateSignCommand() *cobra.Command {
 				return hashErr
 			}
 
-			if header {
+			if hashFlag {
 				cmd.Println(hex.EncodeToString(messageHash))
 				return nil
 			}
@@ -247,7 +247,7 @@ func CreateSignCommand() *cobra.Command {
 	dropperSingleSubcommand.Flags().StringVar(&claimant, "claimant", "", "Address of the intended claimant.")
 	dropperSingleSubcommand.Flags().StringVar(&blockDeadline, "block-deadline", "0", "Block number by which the claim must be made.")
 	dropperSingleSubcommand.Flags().StringVar(&amount, "amount", "0", "Amount of tokens to distribute.")
-	dropperSingleSubcommand.Flags().BoolVar(&header, "hash", false, "Output the message hash instead of the signature.")
+	dropperSingleSubcommand.Flags().BoolVar(&hashFlag, "hash", false, "Output the message hash instead of the signature.")
 
 	dropperBatchSubcommand := &cobra.Command{
 		Use:   "batch",

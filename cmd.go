@@ -7,10 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	bugout "github.com/bugout-dev/bugout-go/pkg"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func CreateRootCommand() *cobra.Command {
@@ -33,7 +37,8 @@ func CreateRootCommand() *cobra.Command {
 	signCmd := CreateSignCommand()
 	accountsCmd := CreateAccountsCommand()
 	moonstreamCommand := CreateMoonstreamCommand()
-	rootCmd.AddCommand(versionCmd, signCmd, accountsCmd, moonstreamCommand)
+	serverCommand := CreateServerCommand()
+	rootCmd.AddCommand(versionCmd, signCmd, accountsCmd, moonstreamCommand, serverCommand)
 
 	completionCmd := CreateCompletionCommand(rootCmd)
 	rootCmd.AddCommand(completionCmd)
@@ -503,4 +508,121 @@ func CreateMoonstreamCommand() *cobra.Command {
 	moonstreamCommand.AddCommand(contractsSubcommand, callRequestsSubcommand, createCallRequestsSubcommand)
 
 	return moonstreamCommand
+}
+
+func CreateServerCommand() *cobra.Command {
+	serverCommand := &cobra.Command{
+		Use:   "server",
+		Short: "API of signing and registration of call requests",
+	}
+
+	var host, config string
+	var port, logLevel int
+	runSubcommand := &cobra.Command{
+		Use:   "run",
+		Short: "Run API server.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configs, configsErr := ReadServerSignerConfig(config)
+			if configsErr != nil {
+				return configsErr
+			}
+			if len(*configs) == 0 {
+				return fmt.Errorf("no signers available")
+			}
+
+			availableSigners := make(map[string]AvailableSigner)
+			for _, c := range *configs {
+				passwordRaw, readErr := os.ReadFile(c.KeyfilePasswordPath)
+				if readErr != nil {
+					return readErr
+				}
+				key, keyErr := KeyFromFile(c.KeyfilePath, string(passwordRaw))
+				if keyErr != nil {
+					return keyErr
+				}
+				availableSigners[key.Address.String()] = AvailableSigner{
+					key: key,
+				}
+				log.Printf("Loaded signer %s", key.Address.String())
+			}
+			corsWhitelist := make(map[string]bool)
+			for _, o := range strings.Split(WAGGLE_CORS_ALLOWED_ORIGINS, ",") {
+				corsWhitelist[o] = true
+			}
+
+			server := Server{
+				Host:             host,
+				Port:             port,
+				AvailableSigners: availableSigners,
+				CORSWhitelist:    corsWhitelist,
+			}
+
+			serveErr := server.Serve()
+			return serveErr
+		},
+	}
+	runSubcommand.Flags().StringVar(&host, "host", "127.0.0.1", "Server listening address")
+	runSubcommand.Flags().IntVar(&port, "port", 7379, "Server listening port")
+	runSubcommand.Flags().StringVar(&config, "config", "./config.json", "Path to server configuration file")
+	runSubcommand.Flags().IntVar(&logLevel, "log-level", 1, "Log verbosity level")
+
+	var keyfile, password, outfile string
+
+	configureCommand := &cobra.Command{
+		Use:   "configure",
+		Short: "Prepare configuration for waggle API server.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			serverSignerConfigs := []ServerSignerConfig{}
+			var passwordRaw []byte
+			var err error
+			if password == "" {
+				fmt.Print("Enter password for keyfile (it will not be displayed on screen): ")
+				passwordRaw, err = term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Print("\n")
+				if err != nil {
+					return fmt.Errorf("error reading password from input: %s", err.Error())
+				}
+			} else {
+				passwordRaw = []byte(password)
+			}
+
+			keyfilePath := strings.TrimSuffix(keyfile, "/")
+			_, err = os.Stat(keyfilePath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("file %s not found, err: %v", keyfilePath, err)
+				}
+				return fmt.Errorf("error due checking keyfile path %s, err: %v", keyfilePath, err)
+			}
+			dir, file := filepath.Split(keyfilePath)
+			passwordFilePath := fmt.Sprintf("%spassword-%s", dir, file)
+			os.WriteFile(passwordFilePath, passwordRaw, 0640)
+
+			// TODO(kompotkot): Provide functionality to generate config with multiple keyfiles
+			serverSignerConfigs = append(serverSignerConfigs, ServerSignerConfig{
+				KeyfilePath:         keyfile,
+				KeyfilePasswordPath: passwordFilePath,
+			})
+			resultJSON, err := json.Marshal(serverSignerConfigs)
+			if err != nil {
+				return err
+			}
+
+			if outfile != "" {
+				os.WriteFile(outfile, resultJSON, 0644)
+			} else {
+				os.Stdout.Write(resultJSON)
+			}
+
+			return nil
+		},
+	}
+
+	configureCommand.PersistentFlags().StringVarP(&keyfile, "keystore", "k", "", "Path to keystore file (this should be a JSON file)")
+	configureCommand.PersistentFlags().StringVarP(&password, "password", "p", "", "Password for keystore file. If not provided, you will be prompted for it when you sign with the key")
+	configureCommand.PersistentFlags().StringVarP(&outfile, "outfile", "o", "config.json", "Config file output path")
+
+	serverCommand.AddCommand(runSubcommand, configureCommand)
+
+	return serverCommand
 }

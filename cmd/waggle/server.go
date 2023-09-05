@@ -1,4 +1,4 @@
-package main
+package waggle
 
 import (
 	"bytes"
@@ -121,15 +121,80 @@ func (server *Server) panicMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// pingRoute response with status of load balancer server itself
-func (server *Server) pingRoute(w http.ResponseWriter, r *http.Request) {
+// PingRoute handles a GET request to the server status endpoint.
+//
+// # Request
+//
+// GET /ping
+//
+// # Response
+//
+// HTTP/1.1 200 OK
+//
+// Headers:
+//
+//	Content-Type: application/json
+//
+// Body:
+//
+//	status: string
+//
+// This endpoint responds with a JSON object indicating the status of the waggle server.
+func (server *Server) PingRoute(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	response := PingResponse{Status: "ok"}
 	json.NewEncoder(w).Encode(response)
 }
 
-// signDropperRoute response with status of load balancer server itself
-func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
+// SignDropperRoute handles a POST request to the signing endpoint.
+//
+// # Request
+//
+// POST /sign/dropper
+//
+// Headers:
+//
+//	Content-Type: application/json
+//
+// Body:
+//
+//	chain_id: int
+//	dropper: string
+//	signer: string
+//	requests: list[
+//	  dropId: string
+//	  requestID: string
+//	  claimant: string
+//	  blockDeadline: string
+//	  amount: string
+//	]
+//
+// # Response
+//
+// HTTP/1.1 200 OK
+//
+// Headers:
+//
+//	Content-Type: application/json
+//
+// Body:
+//
+//	chain_id: int
+//	dropper: string
+//	signer: string
+//	sensible: bool
+//	requests: list[
+//	  dropId: string
+//	  requestID: string
+//	  claimant: string
+//	  blockDeadline: string
+//	  amount: string
+//	  signature: string
+//	  signer: string
+//	]
+//
+// This endpoint responds with signed message from Dropper signer.
+func (server *Server) SignDropperRoute(w http.ResponseWriter, r *http.Request) {
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
 		http.Error(w, "Unable to read body", http.StatusBadRequest)
@@ -182,8 +247,8 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 // Serve handles server run
 func (server *Server) Serve() error {
 	serveMux := http.NewServeMux()
-	serveMux.HandleFunc("/ping", server.pingRoute)
-	serveMux.HandleFunc("/sign/dropper", server.signDropperRoute)
+	serveMux.HandleFunc("/ping", server.PingRoute)
+	serveMux.HandleFunc("/sign/dropper", server.SignDropperRoute)
 
 	// Set list of common middleware, from bottom to top
 	commonHandler := server.corsMiddleware(serveMux)

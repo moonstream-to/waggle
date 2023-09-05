@@ -1,4 +1,4 @@
-package main
+package waggle
 
 import (
 	"encoding/json"

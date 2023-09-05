@@ -1,4 +1,4 @@
-package main
+package waggle
 
 // Much of this code is copied from waggle: https://github.com/bugout-dev/waggle/blob/main/main.go
 

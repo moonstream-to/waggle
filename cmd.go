@@ -397,7 +397,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 	}
 
 	var blockchain, address, contractType, contractId, contractAddress, infile string
-	var limit, offset, batchSize int
+	var limit, offset, batchSize, retries int
 	var showExpired bool
 
 	contractsSubcommand := &cobra.Command{
@@ -495,7 +495,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 				}
 			}
 
-			err := client.CreateCallRequests(contractId, contractAddress, limit, callRequests, batchSize)
+			err := client.CreateCallRequests(contractId, contractAddress, limit, callRequests, batchSize, retries)
 			return err
 		},
 	}
@@ -504,6 +504,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 	createCallRequestsSubcommand.Flags().IntVar(&limit, "ttl-days", 30, "Number of days for which request will remain active")
 	createCallRequestsSubcommand.Flags().StringVar(&infile, "infile", "", "Input file. If not specified, input will be expected from stdin.")
 	createCallRequestsSubcommand.Flags().IntVar(&batchSize, "batch-size", 100, "Number of rows per request to API")
+	createCallRequestsSubcommand.Flags().IntVar(&retries, "retries", 1, "Number of retries for failed requests")
 
 	moonstreamCommand.AddCommand(contractsSubcommand, callRequestsSubcommand, createCallRequestsSubcommand)
 

@@ -230,7 +230,7 @@ func (client *MoonstreamEngineAPIClient) sendCallRequests(requestBodyBytes []byt
 	return nil
 }
 
-func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contractAddress string, ttlDays int, specs []CallRequestSpecification, batchSize int) error {
+func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contractAddress string, ttlDays int, specs []CallRequestSpecification, batchSize, retries int) error {
 	if contractId == "" && contractAddress == "" {
 		return fmt.Errorf("you must specify at least one of contractId or contractAddress when creating call requests")
 	}
@@ -264,9 +264,8 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contract
 		}
 
 		sendReTryCnt := 1
-		maxSendReTryCnt := 3
 	SEND_RETRY:
-		for sendReTryCnt <= maxSendReTryCnt {
+		for sendReTryCnt <= retries {
 			sendCallRequestsErr := client.sendCallRequests(requestBodyBytes)
 			if sendCallRequestsErr == nil {
 				break SEND_RETRY
@@ -275,8 +274,8 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contract
 			sendReTryCnt++
 			time.Sleep(time.Duration(sendReTryCnt) * time.Second)
 
-			if sendReTryCnt > maxSendReTryCnt {
-				return fmt.Errorf("failed to send call requests")
+			if sendReTryCnt > retries {
+				fmt.Printf("failed to send call requests")
 			}
 		}
 

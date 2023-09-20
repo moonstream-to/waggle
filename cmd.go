@@ -586,7 +586,7 @@ func CreateServerCommand() *cobra.Command {
 			var password string
 			var err error
 			if passwordFlag == "" {
-				fmt.Print("Enter password (or path to textfile, or aws secret manager variable name) for keyfile (it will not be displayed on screen)\nInput: ")
+				fmt.Print("Enter password (or path to text file, or aws secret manager variable name) for keyfile (it will not be displayed on screen)\nInput: ")
 				passwordRaw, err := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Print("\n")
 				if err != nil {

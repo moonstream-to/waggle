@@ -17,8 +17,10 @@ PREFIX_CRIT="${C_RED}[CRIT]${C_RESET} [$(date +%d-%m\ %T)]"
 AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 APP_DIR="${APP_DIR:-/home/ubuntu/waggle}"
 SECRETS_DIR="${SECRETS_DIR:-/home/ubuntu/waggle-secrets}"
+STORAGE_PATH="${STORAGE_PATH:-/mnt/disks/storage}"
 PARAMETERS_ENV_PATH="${SECRETS_DIR}/app.env"
 SCRIPT_DIR="$(realpath $(dirname $0))"
+USER_SYSTEMD_DIR="${USER_SYSTEMD_DIR:-/home/ubuntu/.config/systemd/user}"
 
 # Service file
 WAGGLE_SERVICE_FILE="waggle.service"
@@ -47,6 +49,11 @@ echo "AWS_LOCAL_IPV4=$(ec2metadata --local-ipv4)" >> "${PARAMETERS_ENV_PATH}"
 
 echo
 echo
+echo -e "${PREFIX_INFO} Create symlink to config.json"
+ln -s "${STORAGE_PATH}/config.json" "${SECRETS_DIR}/config.json"
+
+echo
+echo
 echo -e "${PREFIX_INFO} Building executable waggle script with Go"
 EXEC_DIR=$(pwd)
 cd "${APP_DIR}"
@@ -55,8 +62,16 @@ cd "${EXEC_DIR}"
 
 echo
 echo
+echo -e "${PREFIX_INFO} Prepare user systemd directory"
+if [ ! -d "${USER_SYSTEMD_DIR}" ]; then
+  mkdir -p "${USER_SYSTEMD_DIR}"
+  echo -e "${PREFIX_WARN} Created new user systemd directory"
+fi
+
+echo
+echo
 echo -e "${PREFIX_INFO} Replacing existing waggle service definition with ${WAGGLE_SERVICE_FILE}"
 chmod 644 "${SCRIPT_DIR}/${WAGGLE_SERVICE_FILE}"
-cp "${SCRIPT_DIR}/${WAGGLE_SERVICE_FILE}" "/home/ubuntu/.config/systemd/user/${WAGGLE_SERVICE_FILE}"
+cp "${SCRIPT_DIR}/${WAGGLE_SERVICE_FILE}" "${USER_SYSTEMD_DIR}/${WAGGLE_SERVICE_FILE}"
 XDG_RUNTIME_DIR="/run/user/$UID" systemctl --user daemon-reload
 XDG_RUNTIME_DIR="/run/user/$UID" systemctl --user restart "${WAGGLE_SERVICE_FILE}"

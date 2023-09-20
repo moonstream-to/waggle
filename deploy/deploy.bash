@@ -14,7 +14,7 @@ PREFIX_WARN="${C_YELLOW}[WARN]${C_RESET} [$(date +%d-%m\ %T)]"
 PREFIX_CRIT="${C_RED}[CRIT]${C_RESET} [$(date +%d-%m\ %T)]"
 
 # Main
-AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
+AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-west-1}"
 APP_DIR="${APP_DIR:-/home/ubuntu/waggle}"
 SECRETS_DIR="${SECRETS_DIR:-/home/ubuntu/waggle-secrets}"
 STORAGE_PATH="${STORAGE_PATH:-/mnt/disks/storage}"
@@ -44,13 +44,14 @@ chmod 0640 "${PARAMETERS_ENV_PATH}"
 
 echo
 echo
-echo -e "${PREFIX_INFO} Add instance local IP to parameters"
+echo -e "${PREFIX_INFO} Add instance local IP and AWS region to parameters"
 echo "AWS_LOCAL_IPV4=$(ec2metadata --local-ipv4)" >> "${PARAMETERS_ENV_PATH}"
+echo "AWS_REGION=${AWS_DEFAULT_REGION}" >> "${PARAMETERS_ENV_PATH}"
 
 echo
 echo
 echo -e "${PREFIX_INFO} Create symlink to config.json"
-ln -s "${STORAGE_PATH}/config.json" "${SECRETS_DIR}/config.json"
+ln -sf "${STORAGE_PATH}/config.json" "${SECRETS_DIR}/config.json"
 
 echo
 echo

@@ -7,6 +7,7 @@ StartLimitBurst=3
 [Service]
 WorkingDirectory=/home/ubuntu/waggle
 EnvironmentFile=/home/ubuntu/waggle-secrets/app.env
+Environment=AWS_REGION="${AWS_REGION}"
 Restart=on-failure
 RestartSec=15s
 ExecStart=/home/ubuntu/waggle/waggle server run --host "${AWS_LOCAL_IPV4}" --port 7379 --config /home/ubuntu/waggle-secrets/config.json

@@ -9,7 +9,7 @@ WorkingDirectory=/home/ubuntu/waggle
 EnvironmentFile=/home/ubuntu/waggle-secrets/app.env
 Restart=on-failure
 RestartSec=15s
-ExecStart=/home/ubuntu/waggle/waggle server run --host "${AWS_LOCAL_IPV4}" --port 7379 --config /home/ubuntu/.waggle/config.json
+ExecStart=/home/ubuntu/waggle/waggle server run --host "${AWS_LOCAL_IPV4}" --port 7379 --config /home/ubuntu/waggle-secrets/config.json
 SyslogIdentifier=waggle
 
 [Install]

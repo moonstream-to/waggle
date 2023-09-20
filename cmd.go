@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
@@ -9,7 +10,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	bugout "github.com/bugout-dev/bugout-go/pkg"
@@ -533,11 +533,7 @@ func CreateServerCommand() *cobra.Command {
 
 			availableSigners := make(map[string]AvailableSigner)
 			for _, c := range *configs {
-				passwordRaw, readErr := os.ReadFile(c.KeyfilePasswordPath)
-				if readErr != nil {
-					return readErr
-				}
-				key, keyErr := KeyFromFile(c.KeyfilePath, string(passwordRaw))
+				key, keyErr := KeyFromFile(c.KeyfilePath, c.Password)
 				if keyErr != nil {
 					return keyErr
 				}
@@ -567,24 +563,46 @@ func CreateServerCommand() *cobra.Command {
 	runSubcommand.Flags().StringVar(&config, "config", "./config.json", "Path to server configuration file")
 	runSubcommand.Flags().IntVar(&logLevel, "log-level", 1, "Log verbosity level")
 
-	var keyfile, password, outfile string
+	var keyfile, passwordFlag, passwordTypeFlag, outfile string
 
 	configureCommand := &cobra.Command{
 		Use:   "configure",
 		Short: "Prepare configuration for waggle API server.",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			var passwordType string
+			var flagsGetStringErr error
+			passwordType, flagsGetStringErr = cmd.Flags().GetString("password-type")
+			if flagsGetStringErr != nil {
+				return flagsGetStringErr
+			}
+
+			switch passwordType {
+			case string(PlainText), string(TextFile), string(AwsSecret):
+				return nil
+			}
+			return errors.New("invalid value: allowed values are 'plaintext', 'text_file' and 'aws_secret'")
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			serverSignerConfigs := []ServerSignerConfig{}
-			var passwordRaw []byte
+			var password string
 			var err error
-			if password == "" {
-				fmt.Print("Enter password for keyfile (it will not be displayed on screen): ")
-				passwordRaw, err = term.ReadPassword(int(os.Stdin.Fd()))
+			if passwordFlag == "" {
+				fmt.Print("Enter password (or path to text file, or aws secret manager variable name) for keyfile (it will not be displayed on screen)\nInput: ")
+				passwordRaw, err := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Print("\n")
 				if err != nil {
 					return fmt.Errorf("error reading password from input: %s", err.Error())
 				}
+				password = string(passwordRaw)
 			} else {
-				passwordRaw = []byte(password)
+				password = passwordFlag
+			}
+
+			var passValidErr error
+			pt := PasswordType(passwordTypeFlag)
+			password, passValidErr = pt.PasswordValidation(password)
+			if passValidErr != nil {
+				return passValidErr
 			}
 
 			keyfilePath := strings.TrimSuffix(keyfile, "/")
@@ -595,19 +613,22 @@ func CreateServerCommand() *cobra.Command {
 				}
 				return fmt.Errorf("error due checking keyfile path %s, err: %v", keyfilePath, err)
 			}
-			dir, file := filepath.Split(keyfilePath)
-			passwordFilePath := fmt.Sprintf("%spassword-%s", dir, file)
-			os.WriteFile(passwordFilePath, passwordRaw, 0640)
 
 			// TODO(kompotkot): Provide functionality to generate config with multiple keyfiles
 			serverSignerConfigs = append(serverSignerConfigs, ServerSignerConfig{
-				KeyfilePath:         keyfile,
-				KeyfilePasswordPath: passwordFilePath,
+				KeyfilePath:  keyfile,
+				Password:     password,
+				PasswordType: passwordTypeFlag,
 			})
-			resultJSON, err := json.Marshal(serverSignerConfigs)
-			if err != nil {
-				return err
+
+			// Using manual encoding to prevent HTML escaping
+			buffer := &bytes.Buffer{}
+			encoder := json.NewEncoder(buffer)
+			encoder.SetEscapeHTML(false)
+			if encodeErr := encoder.Encode(serverSignerConfigs); encodeErr != nil {
+				return encodeErr
 			}
+			resultJSON := buffer.Bytes()
 
 			if outfile != "" {
 				os.WriteFile(outfile, resultJSON, 0644)
@@ -620,7 +641,8 @@ func CreateServerCommand() *cobra.Command {
 	}
 
 	configureCommand.PersistentFlags().StringVarP(&keyfile, "keystore", "k", "", "Path to keystore file (this should be a JSON file)")
-	configureCommand.PersistentFlags().StringVarP(&password, "password", "p", "", "Password for keystore file. If not provided, you will be prompted for it when you sign with the key")
+	configureCommand.PersistentFlags().StringVarP(&passwordFlag, "password", "p", "", "Password for keystore file. If not provided, you will be prompted for it when you sign with the key.")
+	configureCommand.PersistentFlags().StringVarP(&passwordTypeFlag, "password-type", "t", "plaintext", fmt.Sprintf("Format of password, available options: %s, %s, %s", string(PlainText), string(TextFile), string(AwsSecret)))
 	configureCommand.PersistentFlags().StringVarP(&outfile, "outfile", "o", "config.json", "Config file output path")
 
 	serverCommand.AddCommand(runSubcommand, configureCommand)

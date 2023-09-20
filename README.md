@@ -273,7 +273,8 @@ With configuration file you can specify list of signers and sign drops with chos
 [
 	{
 		"keyfile_path": "dev.json",
-		"keyfile_password_path": "password.txt"
+		"password": "password.txt",
+		"password_type": "text_file"
 	}
 ]
 ```
@@ -281,7 +282,7 @@ With configuration file you can specify list of signers and sign drops with chos
 Config also could be generated with command:
 
 ```bash
-waggle server configure --keyfile dev.json --outfile config.json
+waggle server configure --keyfile dev.json --outfile config.json --password-type text_file
 ```
 
 Run server:

@@ -276,7 +276,7 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(
 			time.Sleep(time.Duration(sendReTryCnt) * time.Second)
 
 			if sendReTryCnt > retries {
-				fmt.Printf("failed to send call requests")
+				return fmt.Errorf("failed to send call requests")
 			}
 		}
 

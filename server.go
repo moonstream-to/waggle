@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -9,10 +10,13 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/google/uuid"
 )
 
 type AvailableSigner struct {
@@ -20,11 +24,41 @@ type AvailableSigner struct {
 }
 
 type Server struct {
-	Host             string
-	Port             int
-	AvailableSigners map[string]AvailableSigner
-	LogLevel         int
-	CORSWhitelist    map[string]bool
+	Host                      string
+	Port                      int
+	AvailableSigners          map[string]AvailableSigner
+	LogLevel                  int
+	CORSWhitelist             map[string]bool
+	MoonstreamEngineAPIClient *MoonstreamEngineAPIClient
+
+	ServerMu             sync.Mutex
+	ServerWg             sync.WaitGroup
+	ServerActiveRoutines map[string]*ServerRoutineInfo
+}
+
+type ServerRoutineInfo struct {
+	Id     string `json:"id"`
+	Status string `json:"status"`
+}
+
+func (server *Server) RegisterRoutine(sri *ServerRoutineInfo) {
+	server.ServerMu.Lock()
+	server.ServerActiveRoutines[sri.Id] = sri
+	server.ServerMu.Unlock()
+	server.ServerWg.Add(1)
+}
+
+func (server *Server) ReleaseRoutine(sri *ServerRoutineInfo) {
+	server.ServerMu.Lock()
+	delete(server.ServerActiveRoutines, sri.Id)
+	server.ServerMu.Unlock()
+	server.ServerWg.Done()
+}
+
+func (server *Server) CreateCallRequestsRoutine(sri *ServerRoutineInfo, authorizationToken string, req *SignDropperRequest, specs []CallRequestSpecification) {
+	defer server.ReleaseRoutine(sri)
+	sri.Status = "Running"
+	server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, specs, 100, 1)
 }
 
 type PingResponse struct {
@@ -35,8 +69,39 @@ type SignDropperRequest struct {
 	ChainId  int                    `json:"chain_id"`
 	Dropper  string                 `json:"dropper"`
 	Signer   string                 `json:"signer"`
+	TtlDays  int                    `json:"ttl_days"`
 	Sensible bool                   `json:"sensible"`
 	Requests []*DropperClaimMessage `json:"requests"`
+}
+
+// Check access id was provided correctly and save user access configuration to request context
+func (server *Server) accessMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Extract Authorization token if Bearer header provided
+		var authorizationTokenRaw string
+		authorizationTokenHeaders := r.Header[CASER.String("authorization")]
+		for _, h := range authorizationTokenHeaders {
+			authorizationTokenRaw = h
+		}
+		var authorizationToken string
+		if authorizationTokenRaw != "" {
+			authorizationTokenSlice := strings.Split(authorizationTokenRaw, " ")
+			if len(authorizationTokenSlice) != 2 || authorizationTokenSlice[0] != "Bearer" || authorizationTokenSlice[1] == "" {
+				http.Error(w, "Wrong authorization token provided", http.StatusForbidden)
+				return
+			}
+			authorizationToken = authorizationTokenSlice[1]
+			_, uuidParseErr := uuid.Parse(authorizationToken)
+			if uuidParseErr != nil {
+				http.Error(w, "Wrong authorization token provided", http.StatusForbidden)
+				return
+			}
+		}
+
+		ctxUser := context.WithValue(r.Context(), "authorizationToken", authorizationToken)
+
+		next.ServeHTTP(w, r.WithContext(ctxUser))
+	})
 }
 
 // CORS middleware
@@ -130,6 +195,16 @@ func (server *Server) pingRoute(w http.ResponseWriter, r *http.Request) {
 
 // signDropperRoute response with status of load balancer server itself
 func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
+	authorizationToken := r.Context().Value("authorizationToken").(string)
+
+	isMetatxDrop := false
+	queries := r.URL.Query()
+	for k := range queries {
+		if k == "is_metatx_drop" {
+			isMetatxDrop = true
+		}
+	}
+
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
 		http.Error(w, "Unable to read body", http.StatusBadRequest)
@@ -158,7 +233,8 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, message := range req.Requests {
+	callRequests := make([]CallRequestSpecification, len(req.Requests))
+	for i, message := range req.Requests {
 		messageHash, hashErr := DropperClaimMessageHash(int64(req.ChainId), req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
 		if hashErr != nil {
 			http.Error(w, "Unable to generate message hash", http.StatusInternalServerError)
@@ -173,6 +249,30 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 
 		message.Signature = hex.EncodeToString(signedMessage)
 		message.Signer = server.AvailableSigners[chosenSigner].key.Address.Hex()
+
+		if isMetatxDrop {
+			callRequests[i] = CallRequestSpecification{
+				Caller:    message.Claimant,
+				Method:    "claim",
+				RequestId: message.RequestID,
+				Parameters: DropperCallRequestParameters{
+					DropId:        message.DropId,
+					BlockDeadline: message.BlockDeadline,
+					Amount:        message.Amount,
+					Signer:        message.Signer,
+					Signature:     message.Signature,
+				},
+			}
+		}
+	}
+
+	if isMetatxDrop {
+		newSri := ServerRoutineInfo{
+			Id:     uuid.New().String(),
+			Status: "Initialized",
+		}
+		server.RegisterRoutine(&newSri)
+		go server.CreateCallRequestsRoutine(&newSri, authorizationToken, req, callRequests)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -186,7 +286,8 @@ func (server *Server) Serve() error {
 	serveMux.HandleFunc("/sign/dropper", server.signDropperRoute)
 
 	// Set list of common middleware, from bottom to top
-	commonHandler := server.corsMiddleware(serveMux)
+	commonHandler := server.accessMiddleware(serveMux)
+	commonHandler = server.corsMiddleware(commonHandler)
 	commonHandler = server.logMiddleware(commonHandler)
 	commonHandler = server.panicMiddleware(commonHandler)
 

@@ -173,13 +173,8 @@ func (server *Server) pingRoute(w http.ResponseWriter, r *http.Request) {
 func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 	authorizationToken := r.Context().Value("authorizationToken").(string)
 
-	isMetatxDrop := false
 	queries := r.URL.Query()
-	for k := range queries {
-		if k == "is_metatx_drop" {
-			isMetatxDrop = true
-		}
-	}
+	isMetatxDrop := queries.Has("is_metatx_drop")
 
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
@@ -245,6 +240,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 	if isMetatxDrop {
 		createReqErr := server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, callRequests, 100, 1)
 		if createReqErr == nil {
+			log.Printf("New %d call_requests registered at metatx for %s", len(callRequests), req.Dropper)
 			req.MetatxRegistered = true
 		}
 	}

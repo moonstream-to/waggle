@@ -567,8 +567,6 @@ func CreateServerCommand() *cobra.Command {
 				AvailableSigners:          availableSigners,
 				CORSWhitelist:             corsWhitelist,
 				MoonstreamEngineAPIClient: moonstreamClient,
-
-				ServerActiveRoutines: make(map[string]*ServerRoutineInfo),
 			}
 
 			serveErr := server.Serve()

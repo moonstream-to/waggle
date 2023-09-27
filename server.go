@@ -31,63 +31,8 @@ type Server struct {
 	CORSWhitelist             map[string]bool
 	MoonstreamEngineAPIClient *MoonstreamEngineAPIClient
 
-	ServerMu             sync.Mutex
-	ServerWg             sync.WaitGroup
-	ServerActiveRoutines map[string]*ServerRoutineInfo
-}
-
-type ServerRoutineInfo struct {
-	Id        string `json:"id"`
-	Operation string `json:"operation"`
-	Status    string `json:"status"`
-}
-
-func (server *Server) RegisterServerRoutine(sri *ServerRoutineInfo) {
-	server.ServerMu.Lock()
-	server.ServerActiveRoutines[sri.Id] = sri
-	server.ServerMu.Unlock()
-	server.ServerWg.Add(1)
-}
-
-func (server *Server) ReleaseServerRoutine(sri *ServerRoutineInfo) {
-	server.ServerMu.Lock()
-	// TODO(kompotkot): Add background cleaner to remove memory leaks
-	server.ServerActiveRoutines[sri.Id].Status = "Complete"
-	server.ServerMu.Unlock()
-	server.ServerWg.Done()
-}
-
-func (server *Server) InProgressServerRoutine(sri *ServerRoutineInfo) {
-	server.ServerMu.Lock()
-	server.ServerActiveRoutines[sri.Id].Status = "In Progress"
-	server.ServerMu.Unlock()
-}
-
-func (server *Server) FailedServerRoutine(sri *ServerRoutineInfo) {
-	server.ServerMu.Lock()
-	server.ServerActiveRoutines[sri.Id].Status = "Failed"
-	server.ServerMu.Unlock()
-	server.ServerWg.Done()
-}
-
-func (server *Server) GetServerRoutine(id string) (*ServerRoutineInfo, bool) {
-	server.ServerMu.Lock()
-	routineInfo, routineExists := server.ServerActiveRoutines[id]
-	server.ServerMu.Unlock()
-
-	return routineInfo, routineExists
-}
-
-func (server *Server) CreateCallRequestsRoutine(sri *ServerRoutineInfo, authorizationToken string, req *SignDropperRequest, specs []CallRequestSpecification) {
-	server.InProgressServerRoutine(sri)
-
-	createReqErr := server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, specs, 100, 1)
-	if createReqErr != nil {
-		server.FailedServerRoutine(sri)
-		return
-	}
-
-	server.ReleaseServerRoutine(sri)
+	ServerMu sync.Mutex
+	ServerWg sync.WaitGroup
 }
 
 type PingResponse struct {
@@ -102,7 +47,7 @@ type SignDropperRequest struct {
 	Sensible bool                   `json:"sensible"`
 	Requests []*DropperClaimMessage `json:"requests"`
 
-	ServerRoutineInfoId string `json:"server_routine_info_id"`
+	MetatxRegistered bool `json:"metatx_registered"`
 }
 
 // Check access id was provided correctly and save user access configuration to request context
@@ -298,43 +243,14 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isMetatxDrop {
-		newSri := ServerRoutineInfo{
-			Id:        uuid.New().String(),
-			Operation: "Create call_requests at metatx Engine API",
-			Status:    "Initialized",
+		createReqErr := server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, callRequests, 100, 1)
+		if createReqErr == nil {
+			req.MetatxRegistered = true
 		}
-		server.RegisterServerRoutine(&newSri)
-		go server.CreateCallRequestsRoutine(&newSri, authorizationToken, req, callRequests)
-		req.ServerRoutineInfoId = newSri.Id
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(req)
-}
-
-// InfoRoutinesRoute response with status of call requests registration at metatx Engine API
-func (server *Server) InfoRoutinesRoute(w http.ResponseWriter, r *http.Request) {
-	urlParts := strings.Split(r.URL.Path, "/")
-	if len(urlParts) > 3 {
-		sriId := urlParts[3]
-		_, uuidParseErr := uuid.Parse(sriId)
-		if uuidParseErr != nil {
-			http.Error(w, "Incorrect routine info ID provided", http.StatusBadRequest)
-			return
-		}
-
-		routineInfo, routineExists := server.GetServerRoutine(sriId)
-		if !routineExists {
-			http.Error(w, "Routine info not found", http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(routineInfo)
-	} else {
-		http.Error(w, "Invalid URL", http.StatusBadRequest)
-		return
-	}
 }
 
 // Serve handles server run
@@ -342,7 +258,6 @@ func (server *Server) Serve() error {
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/ping", server.pingRoute)
 	serveMux.HandleFunc("/sign/dropper", server.signDropperRoute)
-	serveMux.HandleFunc("/info/routines/", server.InfoRoutinesRoute)
 
 	// Set list of common middleware, from bottom to top
 	commonHandler := server.accessMiddleware(serveMux)

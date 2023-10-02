@@ -12,6 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var (
@@ -23,6 +25,8 @@ var (
 	BUGOUT_ACCESS_TOKEN = os.Getenv("BUGOUT_ACCESS_TOKEN")
 
 	WAGGLE_CORS_ALLOWED_ORIGINS = os.Getenv("WAGGLE_CORS_ALLOWED_ORIGINS")
+
+	CASER = cases.Title(language.English)
 )
 
 type ServerSignerConfig struct {

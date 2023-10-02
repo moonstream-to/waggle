@@ -60,15 +60,11 @@ type DropperCallRequestParameters struct {
 }
 
 type MoonstreamEngineAPIClient struct {
-	AccessToken string
-	BaseURL     string
-	HTTPClient  *http.Client
+	BaseURL    string
+	HTTPClient *http.Client
 }
 
-func ClientFromEnv() (*MoonstreamEngineAPIClient, error) {
-	if MOONSTREAM_ACCESS_TOKEN == "" {
-		return nil, fmt.Errorf("set the MOONSTREAM_ACCESS_TOKEN environment variable")
-	}
+func InitMoonstreamEngineAPIClient() (*MoonstreamEngineAPIClient, error) {
 	if MOONSTREAM_API_URL == "" {
 		MOONSTREAM_API_URL = "https://api.moonstream.to"
 	}
@@ -83,13 +79,12 @@ func ClientFromEnv() (*MoonstreamEngineAPIClient, error) {
 	httpClient := http.Client{Timeout: timeout}
 
 	return &MoonstreamEngineAPIClient{
-		AccessToken: MOONSTREAM_ACCESS_TOKEN,
-		BaseURL:     MOONSTREAM_API_URL,
-		HTTPClient:  &httpClient,
+		BaseURL:    MOONSTREAM_API_URL,
+		HTTPClient: &httpClient,
 	}, nil
 }
 
-func (client *MoonstreamEngineAPIClient) ListRegisteredContracts(blockchain, address, contractType string, limit, offset int) ([]RegisteredContract, error) {
+func (client *MoonstreamEngineAPIClient) ListRegisteredContracts(accessToken, blockchain, address, contractType string, limit, offset int) ([]RegisteredContract, error) {
 	var contracts []RegisteredContract
 
 	request, requestCreationErr := http.NewRequest("GET", fmt.Sprintf("%s/metatx/contracts/", client.BaseURL), nil)
@@ -97,7 +92,7 @@ func (client *MoonstreamEngineAPIClient) ListRegisteredContracts(blockchain, add
 		return contracts, requestCreationErr
 	}
 
-	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", client.AccessToken))
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", accessToken))
 	request.Header.Add("Accept", "application/json")
 
 	queryParameters := request.URL.Query()
@@ -143,7 +138,7 @@ func (client *MoonstreamEngineAPIClient) ListRegisteredContracts(blockchain, add
 	return contracts, nil
 }
 
-func (client *MoonstreamEngineAPIClient) ListCallRequests(contractId, contractAddress, caller string, limit, offset int, showExpired bool) ([]CallRequest, error) {
+func (client *MoonstreamEngineAPIClient) ListCallRequests(accessToken, contractId, contractAddress, caller string, limit, offset int, showExpired bool) ([]CallRequest, error) {
 	var callRequests []CallRequest
 
 	if caller == "" {
@@ -155,7 +150,7 @@ func (client *MoonstreamEngineAPIClient) ListCallRequests(contractId, contractAd
 		return callRequests, requestCreationErr
 	}
 
-	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", client.AccessToken))
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", accessToken))
 	request.Header.Add("Accept", "application/json")
 
 	queryParameters := request.URL.Query()
@@ -201,13 +196,13 @@ func (client *MoonstreamEngineAPIClient) ListCallRequests(contractId, contractAd
 }
 
 // sendCallRequests sends a POST request to metatx API
-func (client *MoonstreamEngineAPIClient) sendCallRequests(requestBodyBytes []byte) error {
+func (client *MoonstreamEngineAPIClient) sendCallRequests(accessToken string, requestBodyBytes []byte) error {
 	request, requestCreationErr := http.NewRequest("POST", fmt.Sprintf("%s/metatx/requests", client.BaseURL), bytes.NewBuffer(requestBodyBytes))
 	if requestCreationErr != nil {
 		return requestCreationErr
 	}
 
-	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", client.AccessToken))
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", accessToken))
 	request.Header.Add("Accept", "application/json")
 	request.Header.Add("Content-Type", "application/json")
 
@@ -230,7 +225,13 @@ func (client *MoonstreamEngineAPIClient) sendCallRequests(requestBodyBytes []byt
 	return nil
 }
 
-func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contractAddress string, ttlDays int, specs []CallRequestSpecification, batchSize, retries int) error {
+func (client *MoonstreamEngineAPIClient) CreateCallRequests(
+	accessToken,
+	contractId,
+	contractAddress string,
+	ttlDays int,
+	specs []CallRequestSpecification, batchSize, retries int,
+) error {
 	if contractId == "" && contractAddress == "" {
 		return fmt.Errorf("you must specify at least one of contractId or contractAddress when creating call requests")
 	}
@@ -266,7 +267,7 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contract
 		sendReTryCnt := 1
 	SEND_RETRY:
 		for sendReTryCnt <= retries {
-			sendCallRequestsErr := client.sendCallRequests(requestBodyBytes)
+			sendCallRequestsErr := client.sendCallRequests(accessToken, requestBodyBytes)
 			if sendCallRequestsErr == nil {
 				break SEND_RETRY
 			}
@@ -275,7 +276,7 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(contractId, contract
 			time.Sleep(time.Duration(sendReTryCnt) * time.Second)
 
 			if sendReTryCnt > retries {
-				fmt.Printf("failed to send call requests")
+				return fmt.Errorf("failed to send call requests")
 			}
 		}
 

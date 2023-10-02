@@ -404,12 +404,15 @@ func CreateMoonstreamCommand() *cobra.Command {
 		Use:   "contracts",
 		Short: "List all your registered contracts.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, clientErr := ClientFromEnv()
+			if MOONSTREAM_ACCESS_TOKEN == "" {
+				return fmt.Errorf("set the MOONSTREAM_ACCESS_TOKEN environment variable")
+			}
+			client, clientErr := InitMoonstreamEngineAPIClient()
 			if clientErr != nil {
 				return clientErr
 			}
 
-			contracts, err := client.ListRegisteredContracts(blockchain, address, contractType, limit, offset)
+			contracts, err := client.ListRegisteredContracts(MOONSTREAM_ACCESS_TOKEN, blockchain, address, contractType, limit, offset)
 			if err != nil {
 				return err
 			}
@@ -428,12 +431,15 @@ func CreateMoonstreamCommand() *cobra.Command {
 		Use:   "call-requests",
 		Short: "List call requests for a given caller.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, clientErr := ClientFromEnv()
+			if MOONSTREAM_ACCESS_TOKEN == "" {
+				return fmt.Errorf("set the MOONSTREAM_ACCESS_TOKEN environment variable")
+			}
+			client, clientErr := InitMoonstreamEngineAPIClient()
 			if clientErr != nil {
 				return clientErr
 			}
 
-			callRequests, err := client.ListCallRequests(contractId, contractAddress, address, limit, offset, showExpired)
+			callRequests, err := client.ListCallRequests(MOONSTREAM_ACCESS_TOKEN, contractId, contractAddress, address, limit, offset, showExpired)
 			if err != nil {
 				return err
 			}
@@ -453,7 +459,10 @@ func CreateMoonstreamCommand() *cobra.Command {
 		Use:   "drop",
 		Short: "Submit Dropper call requests to the Moonstream Engine API.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, clientErr := ClientFromEnv()
+			if MOONSTREAM_ACCESS_TOKEN == "" {
+				return fmt.Errorf("set the MOONSTREAM_ACCESS_TOKEN environment variable")
+			}
+			client, clientErr := InitMoonstreamEngineAPIClient()
 			if clientErr != nil {
 				return clientErr
 			}
@@ -495,7 +504,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 				}
 			}
 
-			err := client.CreateCallRequests(contractId, contractAddress, limit, callRequests, batchSize, retries)
+			err := client.CreateCallRequests(MOONSTREAM_ACCESS_TOKEN, contractId, contractAddress, limit, callRequests, batchSize, retries)
 			return err
 		},
 	}
@@ -547,11 +556,17 @@ func CreateServerCommand() *cobra.Command {
 				corsWhitelist[o] = true
 			}
 
+			moonstreamClient, clientErr := InitMoonstreamEngineAPIClient()
+			if clientErr != nil {
+				return clientErr
+			}
+
 			server := Server{
-				Host:             host,
-				Port:             port,
-				AvailableSigners: availableSigners,
-				CORSWhitelist:    corsWhitelist,
+				Host:                      host,
+				Port:                      port,
+				AvailableSigners:          availableSigners,
+				CORSWhitelist:             corsWhitelist,
+				MoonstreamEngineAPIClient: moonstreamClient,
 			}
 
 			serveErr := server.Serve()

@@ -555,7 +555,10 @@ func CreateServerCommand() *cobra.Command {
 			for _, o := range strings.Split(WAGGLE_CORS_ALLOWED_ORIGINS, ",") {
 				corsWhitelist[o] = true
 			}
-
+			bugoutClient, bugoutClientErr := InitBugoutAPIClient()
+			if bugoutClientErr != nil {
+				return bugoutClientErr
+			}
 			moonstreamClient, clientErr := InitMoonstreamEngineAPIClient()
 			if clientErr != nil {
 				return clientErr
@@ -566,6 +569,7 @@ func CreateServerCommand() *cobra.Command {
 				Port:                      port,
 				AvailableSigners:          availableSigners,
 				CORSWhitelist:             corsWhitelist,
+				BugoutAPIClient:           bugoutClient,
 				MoonstreamEngineAPIClient: moonstreamClient,
 			}
 

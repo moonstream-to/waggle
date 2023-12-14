@@ -241,13 +241,18 @@ go test ./... -v
 
 The Waggle API Server Extension is designed to offer a RESTfull API access for `waggle` functionalities. It builds over existing waggle features, enhancing operational efficiency and automating routine tasks.
 
-Executes `sign dropper` functionalities such as certifying drop claims for Dropper v0.2.0 by sending POST requests:
+List available signers at waggle server:
+
+```bash
+curl "http://127.0.0.1:7379/signers"
+```
+
+Executes `sign dropper` functionalities such as certifying drop claims for Dropper v0.2.0 by sending POST requests to `http://127.0.0.1:7379/signers/<signer_address>/sign/dropper`:
 
 ```json
 {
 	"chain_id": 80001,
 	"dropper": "0x4ec36E288E1b5d6914851a141cb041152Cf95328",
-	"signer": "0x629c51488a18fc75f4b8993743f3c132316951c9",
 	"requests": [
 		{
 			"dropId": "2",
@@ -290,3 +295,5 @@ Run server:
 ```bash
 waggle server run --host 0.0.0.0 --config config.json
 ```
+
+Fetch

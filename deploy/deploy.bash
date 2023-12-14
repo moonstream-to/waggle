@@ -50,8 +50,11 @@ echo "AWS_REGION=${AWS_DEFAULT_REGION}" >> "${PARAMETERS_ENV_PATH}"
 
 echo
 echo
-echo -e "${PREFIX_INFO} Create symlink to config.json"
-ln -sf "${STORAGE_PATH}/config.json" "${SECRETS_DIR}/config.json"
+echo -e "${PREFIX_INFO} Prepare symlink to config"
+if [ ! -f "${SECRETS_DIR}/config.json" ]; then
+  ln -sf "${STORAGE_PATH}/config.json" "${SECRETS_DIR}/config.json"
+  echo -e "${PREFIX_WARN} Created symling to config.json"
+fi
 
 echo
 echo

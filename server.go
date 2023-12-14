@@ -29,6 +29,7 @@ type Server struct {
 	AvailableSigners          map[string]AvailableSigner
 	LogLevel                  int
 	CORSWhitelist             map[string]bool
+	BugoutAPIClient           *BugoutAPIClient
 	MoonstreamEngineAPIClient *MoonstreamEngineAPIClient
 
 	ServerMu sync.Mutex
@@ -39,15 +40,32 @@ type PingResponse struct {
 	Status string `json:"status"`
 }
 
+type VersionResponse struct {
+	Version string `json:"version"`
+}
+
+type SignersResponse struct {
+	Signers []string `json:"signers"`
+}
+
 type SignDropperRequest struct {
 	ChainId  int                    `json:"chain_id"`
 	Dropper  string                 `json:"dropper"`
-	Signer   string                 `json:"signer"`
 	TtlDays  int                    `json:"ttl_days"`
 	Sensible bool                   `json:"sensible"`
 	Requests []*DropperClaimMessage `json:"requests"`
 
 	MetatxRegistered bool `json:"metatx_registered"`
+}
+
+type AccessLevel struct {
+	Admin             bool
+	RequestSignatures bool
+}
+
+type AuthorizationContext struct {
+	AuthorizationToken string
+	AccessLevel        AccessLevel
 }
 
 // Check access id was provided correctly and save user access configuration to request context
@@ -60,21 +78,66 @@ func (server *Server) accessMiddleware(next http.Handler) http.Handler {
 			authorizationTokenRaw = h
 		}
 		var authorizationToken string
-		if authorizationTokenRaw != "" {
-			authorizationTokenSlice := strings.Split(authorizationTokenRaw, " ")
-			if len(authorizationTokenSlice) != 2 || authorizationTokenSlice[0] != "Bearer" || authorizationTokenSlice[1] == "" {
-				http.Error(w, "Wrong authorization token provided", http.StatusForbidden)
-				return
-			}
-			authorizationToken = authorizationTokenSlice[1]
-			_, uuidParseErr := uuid.Parse(authorizationToken)
-			if uuidParseErr != nil {
-				http.Error(w, "Wrong authorization token provided", http.StatusForbidden)
-				return
-			}
+		if authorizationTokenRaw == "" {
+			http.Error(w, "No authorization header passed with request", http.StatusForbidden)
+			return
 		}
 
-		ctxUser := context.WithValue(r.Context(), "authorizationToken", authorizationToken)
+		authorizationTokenSlice := strings.Split(authorizationTokenRaw, " ")
+		if len(authorizationTokenSlice) != 2 || authorizationTokenSlice[0] != "Bearer" || authorizationTokenSlice[1] == "" {
+			http.Error(w, "Wrong authorization token provided", http.StatusForbidden)
+			return
+		}
+		authorizationToken = authorizationTokenSlice[1]
+		_, uuidParseErr := uuid.Parse(authorizationToken)
+		if uuidParseErr != nil {
+			http.Error(w, "Wrong authorization token provided", http.StatusForbidden)
+			return
+		}
+
+		user, getUserErr := server.BugoutAPIClient.GetUser(authorizationToken)
+		if getUserErr != nil {
+			log.Println(getUserErr)
+			http.Error(w, "Access token not found", http.StatusNotFound)
+			return
+		}
+		if user.ApplicationId != MOONSTREAM_APPLICATION_ID {
+			http.Error(w, "Wrong bugout application", http.StatusForbidden)
+			return
+		}
+
+		accessWaggleResources, getAccessErr := server.BugoutAPIClient.GetAccessLevelFromResources()
+		if getAccessErr != nil {
+			log.Println(getAccessErr)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		var accessLevel AccessLevel
+		accessGranted := false
+		for _, resource := range accessWaggleResources.Resources {
+			if resource.ResourceData.UserId == user.Id {
+				if resource.ResourceData.AccessLevel == "admin" {
+					accessLevel.Admin = true
+					accessGranted = true
+				}
+				if resource.ResourceData.AccessLevel == "request_signatures" {
+					accessLevel.RequestSignatures = true
+					accessGranted = true
+				}
+			}
+		}
+		if !accessGranted {
+			http.Error(w, "Access restricted", http.StatusForbidden)
+			return
+		}
+
+		authorizationContext := AuthorizationContext{
+			AuthorizationToken: authorizationToken,
+			AccessLevel:        accessLevel,
+		}
+
+		ctxUser := context.WithValue(r.Context(), "authorizationContext", authorizationContext)
 
 		next.ServeHTTP(w, r.WithContext(ctxUser))
 	})
@@ -169,9 +232,57 @@ func (server *Server) pingRoute(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func (server *Server) versionRoute(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	response := VersionResponse{Version: WAGGLE_VERSION}
+	json.NewEncoder(w).Encode(response)
+}
+
+func (server *Server) signersHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		server.signersRoute(w, r)
+		return
+	case http.MethodPost:
+		routePathSlice := strings.Split(r.URL.Path, "/")
+		requestedSigner := common.HexToAddress(routePathSlice[2]).String()
+		_, ok := server.AvailableSigners[requestedSigner]
+		if !ok {
+			http.Error(w, fmt.Sprintf("Unacceptable signer provided %s", requestedSigner), http.StatusBadRequest)
+			return
+		}
+		switch {
+		case strings.Contains(r.URL.Path, "/dropper/sign"):
+			// TODO: (kompotkot): Re-write in subroutes and subapps when times come
+			server.signDropperRoute(w, r, requestedSigner)
+			return
+		default:
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func (server *Server) signersRoute(w http.ResponseWriter, r *http.Request) {
+	signers := make([]string, len(server.AvailableSigners))
+	i := 0
+	for s := range server.AvailableSigners {
+		signers[i] = s
+		i++
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(SignersResponse{
+		Signers: signers,
+	})
+}
+
 // signDropperRoute sign dropper call requests
-func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
-	authorizationToken := r.Context().Value("authorizationToken").(string)
+func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, signer string) {
+	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
+	authorizationToken := authorizationContext.AuthorizationToken
 
 	queries := r.URL.Query()
 	isMetatxDrop := queries.Has("is_metatx_drop")
@@ -192,18 +303,6 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if server can sign with provided signer address
-	var chosenSigner string
-	for addr := range server.AvailableSigners {
-		if addr == common.HexToAddress(req.Signer).String() {
-			chosenSigner = addr
-		}
-	}
-	if chosenSigner == "" {
-		http.Error(w, "Unable to find signer", http.StatusBadRequest)
-		return
-	}
-
 	callRequests := make([]CallRequestSpecification, len(req.Requests))
 	for i, message := range req.Requests {
 		messageHash, hashErr := DropperClaimMessageHash(int64(req.ChainId), req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
@@ -212,14 +311,14 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		signedMessage, signatureErr := SignRawMessage(messageHash, server.AvailableSigners[chosenSigner].key, req.Sensible)
+		signedMessage, signatureErr := SignRawMessage(messageHash, server.AvailableSigners[signer].key, req.Sensible)
 		if signatureErr != nil {
 			http.Error(w, "Unable to sign message", http.StatusInternalServerError)
 			return
 		}
 
 		message.Signature = hex.EncodeToString(signedMessage)
-		message.Signer = server.AvailableSigners[chosenSigner].key.Address.Hex()
+		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
 
 		if isMetatxDrop {
 			callRequests[i] = CallRequestSpecification{
@@ -230,7 +329,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 					DropId:        message.DropId,
 					BlockDeadline: message.BlockDeadline,
 					Amount:        message.Amount,
-					Signer:        message.Signer,
+					Signer:        signer,
 					Signature:     message.Signature,
 				},
 			}
@@ -252,12 +351,12 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request) {
 // Serve handles server run
 func (server *Server) Serve() error {
 	serveMux := http.NewServeMux()
+	serveMux.Handle("/signers/", server.accessMiddleware(http.HandlerFunc(server.signersHandler)))
 	serveMux.HandleFunc("/ping", server.pingRoute)
-	serveMux.HandleFunc("/sign/dropper", server.signDropperRoute)
+	serveMux.HandleFunc("/version", server.versionRoute)
 
 	// Set list of common middleware, from bottom to top
-	commonHandler := server.accessMiddleware(serveMux)
-	commonHandler = server.corsMiddleware(commonHandler)
+	commonHandler := server.corsMiddleware(serveMux)
 	commonHandler = server.logMiddleware(commonHandler)
 	commonHandler = server.panicMiddleware(commonHandler)
 

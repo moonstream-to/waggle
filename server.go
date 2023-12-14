@@ -244,22 +244,22 @@ func (server *Server) signersHandler(w http.ResponseWriter, r *http.Request) {
 		server.signersRoute(w, r)
 		return
 	case http.MethodPost:
-		var signer string
 		routePathSlice := strings.Split(r.URL.Path, "/")
-		requestedSigner := common.HexToAddress(routePathSlice[2])
-		for s := range server.AvailableSigners {
-			if s == requestedSigner.String() {
-				signer = s
-				break
-			}
-		}
-		if signer == "" {
-			http.Error(w, fmt.Sprintf("Unacceptable signer provided %s", signer), http.StatusBadRequest)
+		requestedSigner := common.HexToAddress(routePathSlice[2]).String()
+		_, ok := server.AvailableSigners[requestedSigner]
+		if !ok {
+			http.Error(w, fmt.Sprintf("Unacceptable signer provided %s", requestedSigner), http.StatusBadRequest)
 			return
 		}
-
-		server.signDropperRoute(w, r, signer)
-		return
+		switch {
+		case strings.Contains(r.URL.Path, "/dropper/sign"):
+			// TODO: (kompotkot): Re-write in subroutes and subapps when times come
+			server.signDropperRoute(w, r, requestedSigner)
+			return
+		default:
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -281,7 +281,6 @@ func (server *Server) signersRoute(w http.ResponseWriter, r *http.Request) {
 
 // signDropperRoute sign dropper call requests
 func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, signer string) {
-
 	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
 	authorizationToken := authorizationContext.AuthorizationToken
 

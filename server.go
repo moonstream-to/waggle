@@ -55,6 +55,16 @@ type SignDropperRequest struct {
 	Sensible bool                   `json:"sensible"`
 	Requests []*DropperClaimMessage `json:"requests"`
 
+	NoMetatx bool `json:"no_metatx"`
+}
+
+type SignDropperResponse struct {
+	ChainId  int                    `json:"chain_id"`
+	Dropper  string                 `json:"dropper"`
+	TtlDays  int                    `json:"ttl_days"`
+	Sensible bool                   `json:"sensible"`
+	Requests []*DropperClaimMessage `json:"requests"`
+
 	MetatxRegistered bool `json:"metatx_registered"`
 }
 
@@ -284,9 +294,6 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
 	authorizationToken := authorizationContext.AuthorizationToken
 
-	queries := r.URL.Query()
-	isMetatxDrop := queries.Has("is_metatx_drop")
-
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
 		http.Error(w, "Unable to read body", http.StatusBadRequest)
@@ -320,7 +327,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		message.Signature = hex.EncodeToString(signedMessage)
 		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
 
-		if isMetatxDrop {
+		if !req.NoMetatx {
 			callRequests[i] = CallRequestSpecification{
 				Caller:    message.Claimant,
 				Method:    "claim",
@@ -336,16 +343,24 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		}
 	}
 
-	if isMetatxDrop {
+	resp := SignDropperResponse{
+		ChainId:  req.ChainId,
+		Dropper:  req.Dropper,
+		TtlDays:  req.TtlDays,
+		Sensible: req.Sensible,
+		Requests: req.Requests,
+	}
+
+	if !req.NoMetatx {
 		createReqErr := server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, callRequests, 100, 1)
 		if createReqErr == nil {
 			log.Printf("New %d call_requests registered at metatx for %s", len(callRequests), req.Dropper)
-			req.MetatxRegistered = true
+			resp.MetatxRegistered = true
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(req)
+	json.NewEncoder(w).Encode(resp)
 }
 
 // Serve handles server run

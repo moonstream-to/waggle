@@ -294,9 +294,6 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
 	authorizationToken := authorizationContext.AuthorizationToken
 
-	queries := r.URL.Query()
-	noMetatx := queries.Has("no_metatx")
-
 	body, readErr := io.ReadAll(r.Body)
 	if readErr != nil {
 		http.Error(w, "Unable to read body", http.StatusBadRequest)
@@ -330,7 +327,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		message.Signature = hex.EncodeToString(signedMessage)
 		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
 
-		if !noMetatx {
+		if !req.NoMetatx {
 			callRequests[i] = CallRequestSpecification{
 				Caller:    message.Claimant,
 				Method:    "claim",
@@ -354,7 +351,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		Requests: req.Requests,
 	}
 
-	if !noMetatx {
+	if !req.NoMetatx {
 		createReqErr := server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, callRequests, 100, 1)
 		if createReqErr == nil {
 			log.Printf("New %d call_requests registered at metatx for %s", len(callRequests), req.Dropper)

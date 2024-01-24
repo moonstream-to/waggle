@@ -239,7 +239,10 @@ func (server *Server) holdersHandler(w http.ResponseWriter, r *http.Request) {
 		server.holdersRoute(w, r)
 		return
 	case http.MethodPost:
-		server.grantHolderAccessRoute(w, r)
+		server.modifyHolderAccessRoute(w, r, "POST")
+		return
+	case http.MethodDelete:
+		server.modifyHolderAccessRoute(w, r, "DELETE")
 		return
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -254,7 +257,7 @@ func (server *Server) holdersRoute(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(accessResourceHolders.Holders)
 }
 
-func (server *Server) grantHolderAccessRoute(w http.ResponseWriter, r *http.Request) {
+func (server *Server) modifyHolderAccessRoute(w http.ResponseWriter, r *http.Request, method string) {
 	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
 	authorizationToken := authorizationContext.AuthorizationToken
 
@@ -273,7 +276,7 @@ func (server *Server) grantHolderAccessRoute(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Unable to parse body", http.StatusBadRequest)
 	}
 
-	accessResourceHolders, statusCode, checkAccessErr := server.BugoutAPIClient.GrantAccessToResource(authorizationToken, server.AccessResourceId, req)
+	accessResourceHolders, statusCode, checkAccessErr := server.BugoutAPIClient.ModifyAccessToResource(authorizationToken, server.AccessResourceId, method, req)
 	if checkAccessErr != nil {
 		log.Println(statusCode, checkAccessErr)
 		switch statusCode {
@@ -410,7 +413,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 func (server *Server) Serve() error {
 	serveMux := http.NewServeMux()
 	serveMux.Handle("/signers/", server.accessMiddleware(http.HandlerFunc(server.signersHandler)))
-	serveMux.Handle("/holders/", server.accessMiddleware(http.HandlerFunc(server.holdersHandler)))
+	serveMux.Handle("/holders", server.accessMiddleware(http.HandlerFunc(server.holdersHandler)))
 	serveMux.HandleFunc("/ping", server.pingRoute)
 	serveMux.HandleFunc("/version", server.versionRoute)
 

@@ -268,7 +268,7 @@ func (c *BugoutAPIClient) CheckAccessToResource(token, resourceId string) (Resou
 	return resourceHolders, response.StatusCode, nil
 }
 
-func (c *BugoutAPIClient) GrantAccessToResource(token, resourceId string, requestResourceHolder *RequestResourceHolder) (ResourceHolders, int, error) {
+func (c *BugoutAPIClient) ModifyAccessToResource(token, resourceId, method string, requestResourceHolder *RequestResourceHolder) (ResourceHolders, int, error) {
 	var resourceHolders ResourceHolders
 
 	requestBody := RequestResourceHolder{
@@ -279,7 +279,7 @@ func (c *BugoutAPIClient) GrantAccessToResource(token, resourceId string, reques
 	reqBodyBytes := new(bytes.Buffer)
 	json.NewEncoder(reqBodyBytes).Encode(requestBody)
 
-	request, requestErr := http.NewRequest("POST", fmt.Sprintf("%s/resources/%s/holders", c.BroodBaseURL, resourceId), reqBodyBytes)
+	request, requestErr := http.NewRequest(method, fmt.Sprintf("%s/resources/%s/holders", c.BroodBaseURL, resourceId), reqBodyBytes)
 	if requestErr != nil {
 		return resourceHolders, 500, requestErr
 	}

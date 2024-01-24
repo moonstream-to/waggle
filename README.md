@@ -275,13 +275,16 @@ Executes `sign dropper` functionalities such as certifying drop claims for Dropp
 With configuration file you can specify list of signers and sign drops with chosen one. Example of server configuration file `config.json`:
 
 ```json
-[
-	{
-		"keyfile_path": "dev.json",
-		"password": "password.txt",
-		"password_type": "text_file"
-	}
-]
+{
+	"access_resource_id": "<access_brood_resource_uuid>",
+	"signers": [
+		{
+			"keyfile_path": "dev.json",
+			"password": "password.txt",
+			"password_type": "text_file"
+		}
+	]
+}
 ```
 
 Config also could be generated with command:

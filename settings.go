@@ -43,6 +43,11 @@ type ServerSignerConfig struct {
 	PasswordType string `json:"password_type"`
 }
 
+type ServerConfig struct {
+	AccessResourceId string               `json:"access_resource_id"`
+	Signers          []ServerSignerConfig `json:"signers"`
+}
+
 // PasswordType specifies available password types
 type PasswordType string
 
@@ -140,8 +145,8 @@ func (ssc *ServerSignerConfig) ParseKeyfilePassword() (string, error) {
 }
 
 // ReadConfig parses list of configuration file paths to list of Application Probes configs
-func ReadServerSignerConfig(rawConfigPath string) (*[]ServerSignerConfig, error) {
-	var configs []ServerSignerConfig
+func ReadServerConfig(rawConfigPath string) (*ServerConfig, error) {
+	var config ServerConfig
 
 	configPath := strings.TrimSuffix(rawConfigPath, "/")
 	_, err := os.Stat(configPath)
@@ -156,13 +161,14 @@ func ReadServerSignerConfig(rawConfigPath string) (*[]ServerSignerConfig, error)
 	if err != nil {
 		log.Fatal(err)
 	}
-	configTemp := &[]ServerSignerConfig{}
+	configTemp := &ServerConfig{}
 	err = json.Unmarshal(rawBytes, configTemp)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, ct := range *configTemp {
+	config.AccessResourceId = configTemp.AccessResourceId
+	for _, ct := range configTemp.Signers {
 		_, err := os.Stat(ct.KeyfilePath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -176,12 +182,12 @@ func ReadServerSignerConfig(rawConfigPath string) (*[]ServerSignerConfig, error)
 		if passParseErr != nil {
 			continue
 		}
-		configs = append(configs, ServerSignerConfig{
+		config.Signers = append(config.Signers, ServerSignerConfig{
 			KeyfilePath:  ct.KeyfilePath,
 			Password:     password,
 			PasswordType: ct.PasswordType,
 		})
 	}
 
-	return &configs, nil
+	return &config, nil
 }

@@ -215,62 +215,49 @@ func (c *BugoutAPIClient) GetUser(accessToken string) (User, error) {
 	return user, nil
 }
 
-type AccessWaggleResourceData struct {
-	Type        string `json:"type"`
-	Customer    string `json:"customer"`
-	AccessLevel string `json:"access_level"`
-	UserId      string `json:"user_id"`
+type ResourceHolder struct {
+	Id          string   `json:"id"`
+	HolderType  string   `json:"holder_type"`
+	Permissions []string `json:"permissions"`
 }
 
-type AccessWaggleResource struct {
-	Id            string                   `json:"id"`
-	ApplicationId string                   `json:"application_id"`
-	ResourceData  AccessWaggleResourceData `json:"resource_data"`
-	CreatedAt     string                   `json:"created_at"`
-	UpdatedAt     string                   `json:"updated_at"`
+type ResourceHolders struct {
+	ResourceId string           `json:"resource_id"`
+	Holders    []ResourceHolder `json:"holders"`
 }
 
-type AccessWaggleResources struct {
-	Resources []AccessWaggleResource `json:"resources"`
-}
+func (c *BugoutAPIClient) CheckAccessToResource(token, resourceId string) (ResourceHolders, int, error) {
+	var resourceHolders ResourceHolders
 
-func (c *BugoutAPIClient) GetAccessLevelFromResources() (AccessWaggleResources, error) {
-	var accessWaggleResources AccessWaggleResources
 	var requestBodyBytes []byte
-	request, requestErr := http.NewRequest("GET", fmt.Sprintf("%s/resources", c.BroodBaseURL), bytes.NewBuffer(requestBodyBytes))
+	request, requestErr := http.NewRequest("GET", fmt.Sprintf("%s/resources/%s/holders", c.BroodBaseURL, resourceId), bytes.NewBuffer(requestBodyBytes))
 	if requestErr != nil {
-		return accessWaggleResources, requestErr
+		return resourceHolders, 500, requestErr
 	}
-	queryParameters := request.URL.Query()
-	queryParameters.Add("application_id", MOONSTREAM_APPLICATION_ID)
-	queryParameters.Add("type", BUGOUT_RESOURCE_TYPE_WAGGLE_ACCESS)
 
-	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", MOONSTREAM_WAGGLE_ADMIN_ACCESS_TOKEN))
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 	request.Header.Add("Accept", "application/json")
 	request.Header.Add("Content-Type", "application/json")
 
 	response, responseErr := c.HTTPClient.Do(request)
 	if responseErr != nil {
-		return accessWaggleResources, responseErr
+		return resourceHolders, 500, responseErr
 	}
 	defer response.Body.Close()
 
 	responseBody, responseBodyErr := io.ReadAll(response.Body)
+	if responseBodyErr != nil {
+		return resourceHolders, response.StatusCode, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
+	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		if responseBodyErr != nil {
-			return accessWaggleResources, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, responseBodyErr.Error())
-		}
+		return resourceHolders, response.StatusCode, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, response.Status)
 	}
 
-	if responseBodyErr != nil {
-		return accessWaggleResources, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
-	}
-
-	unmarshalErr := json.Unmarshal(responseBody, &accessWaggleResources)
+	unmarshalErr := json.Unmarshal(responseBody, &resourceHolders)
 	if unmarshalErr != nil {
-		return accessWaggleResources, fmt.Errorf("could not parse response body: %s", unmarshalErr.Error())
+		return resourceHolders, response.StatusCode, fmt.Errorf("could not parse response body: %s", unmarshalErr.Error())
 	}
 
-	return accessWaggleResources, nil
+	return resourceHolders, response.StatusCode, nil
 }

@@ -26,6 +26,7 @@ type AvailableSigner struct {
 type Server struct {
 	Host                      string
 	Port                      int
+	AccessResourceId          string
 	AvailableSigners          map[string]AvailableSigner
 	LogLevel                  int
 	CORSWhitelist             map[string]bool
@@ -75,7 +76,6 @@ type AccessLevel struct {
 
 type AuthorizationContext struct {
 	AuthorizationToken string
-	AccessLevel        AccessLevel
 }
 
 // Check access id was provided correctly and save user access configuration to request context
@@ -105,46 +105,29 @@ func (server *Server) accessMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		user, getUserErr := server.BugoutAPIClient.GetUser(authorizationToken)
-		if getUserErr != nil {
-			log.Println(getUserErr)
-			http.Error(w, "Access token not found", http.StatusNotFound)
-			return
-		}
-		if user.ApplicationId != MOONSTREAM_APPLICATION_ID {
-			http.Error(w, "Wrong bugout application", http.StatusForbidden)
-			return
-		}
-
-		accessWaggleResources, getAccessErr := server.BugoutAPIClient.GetAccessLevelFromResources()
-		if getAccessErr != nil {
-			log.Println(getAccessErr)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		var accessLevel AccessLevel
-		accessGranted := false
-		for _, resource := range accessWaggleResources.Resources {
-			if resource.ResourceData.UserId == user.Id {
-				if resource.ResourceData.AccessLevel == "admin" {
-					accessLevel.Admin = true
-					accessGranted = true
-				}
-				if resource.ResourceData.AccessLevel == "request_signatures" {
-					accessLevel.RequestSignatures = true
-					accessGranted = true
-				}
+		access, statusCode, checkAccessErr := server.BugoutAPIClient.CheckAccessToResource(authorizationToken, server.AccessResourceId)
+		if checkAccessErr != nil {
+			log.Println(statusCode, checkAccessErr)
+			switch statusCode {
+			case 404:
+				http.Error(w, "Not Found", http.StatusNotFound)
+			case 400, 401, 403:
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			default:
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
 			}
+			return
 		}
-		if !accessGranted {
+
+		if len(access.Holders) < 1 {
 			http.Error(w, "Access restricted", http.StatusForbidden)
 			return
 		}
 
+		// TODO(kompotkot): Add background task to fetch user ID and log it
+
 		authorizationContext := AuthorizationContext{
 			AuthorizationToken: authorizationToken,
-			AccessLevel:        accessLevel,
 		}
 
 		ctxUser := context.WithValue(r.Context(), "authorizationContext", authorizationContext)

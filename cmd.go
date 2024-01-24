@@ -532,16 +532,16 @@ func CreateServerCommand() *cobra.Command {
 		Use:   "run",
 		Short: "Run API server.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configs, configsErr := ReadServerSignerConfig(config)
+			config, configsErr := ReadServerConfig(config)
 			if configsErr != nil {
 				return configsErr
 			}
-			if len(*configs) == 0 {
+			if len(config.Signers) == 0 {
 				return fmt.Errorf("no signers available")
 			}
 
 			availableSigners := make(map[string]AvailableSigner)
-			for _, c := range *configs {
+			for _, c := range config.Signers {
 				key, keyErr := KeyFromFile(c.KeyfilePath, c.Password)
 				if keyErr != nil {
 					return keyErr
@@ -567,6 +567,7 @@ func CreateServerCommand() *cobra.Command {
 			server := Server{
 				Host:                      host,
 				Port:                      port,
+				AccessResourceId:          config.AccessResourceId,
 				AvailableSigners:          availableSigners,
 				CORSWhitelist:             corsWhitelist,
 				BugoutAPIClient:           bugoutClient,

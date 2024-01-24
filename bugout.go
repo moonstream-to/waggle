@@ -252,15 +252,12 @@ func (c *BugoutAPIClient) CheckAccessToResource(token, resourceId string) (Resou
 	defer response.Body.Close()
 
 	responseBody, responseBodyErr := io.ReadAll(response.Body)
-
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		if responseBodyErr != nil {
-			return resourceHolders, response.StatusCode, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, responseBodyErr.Error())
-		}
-	}
-
 	if responseBodyErr != nil {
 		return resourceHolders, response.StatusCode, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return resourceHolders, response.StatusCode, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, response.Status)
 	}
 
 	unmarshalErr := json.Unmarshal(responseBody, &resourceHolders)

@@ -215,6 +215,12 @@ func (c *BugoutAPIClient) GetUser(accessToken string) (User, error) {
 	return user, nil
 }
 
+type RequestResourceHolder struct {
+	HolderId    string   `json:"holder_id"`
+	HolderType  string   `json:"holder_type"`
+	Permissions []string `json:"permissions"`
+}
+
 type ResourceHolder struct {
 	Id          string   `json:"id"`
 	HolderType  string   `json:"holder_type"`
@@ -255,6 +261,49 @@ func (c *BugoutAPIClient) CheckAccessToResource(token, resourceId string) (Resou
 
 	if responseBodyErr != nil {
 		return resourceHolders, response.StatusCode, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
+	}
+
+	unmarshalErr := json.Unmarshal(responseBody, &resourceHolders)
+	if unmarshalErr != nil {
+		return resourceHolders, response.StatusCode, fmt.Errorf("could not parse response body: %s", unmarshalErr.Error())
+	}
+
+	return resourceHolders, response.StatusCode, nil
+}
+
+func (c *BugoutAPIClient) GrantAccessToResource(token, resourceId string, requestResourceHolder *RequestResourceHolder) (ResourceHolders, int, error) {
+	var resourceHolders ResourceHolders
+
+	requestBody := RequestResourceHolder{
+		HolderId:    requestResourceHolder.HolderId,
+		HolderType:  requestResourceHolder.HolderType,
+		Permissions: requestResourceHolder.Permissions,
+	}
+	reqBodyBytes := new(bytes.Buffer)
+	json.NewEncoder(reqBodyBytes).Encode(requestBody)
+
+	request, requestErr := http.NewRequest("POST", fmt.Sprintf("%s/resources/%s/holders", c.BroodBaseURL, resourceId), reqBodyBytes)
+	if requestErr != nil {
+		return resourceHolders, 500, requestErr
+	}
+
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
+	request.Header.Add("Accept", "application/json")
+	request.Header.Add("Content-Type", "application/json")
+
+	response, responseErr := c.HTTPClient.Do(request)
+	if responseErr != nil {
+		return resourceHolders, 500, responseErr
+	}
+	defer response.Body.Close()
+
+	responseBody, responseBodyErr := io.ReadAll(response.Body)
+	if responseBodyErr != nil {
+		return resourceHolders, response.StatusCode, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
+	}
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return resourceHolders, response.StatusCode, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, response.Status)
 	}
 
 	unmarshalErr := json.Unmarshal(responseBody, &resourceHolders)

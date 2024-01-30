@@ -279,24 +279,30 @@ With configuration file you can specify list of signers and sign drops with chos
 	"access_resource_id": "<access_brood_resource_uuid>",
 	"signers": [
 		{
-			"keyfile_path": "dev.json",
-			"password": "password.txt",
-			"password_type": "text_file"
+			"keyfile": "<path_to_account_keystore_JSON_file>",
+			"keyfile_type": "file",
+			"password": "KEYFILE_PASSWORD_ENVIRONMENT_VARIABLE",
+			"password_type": "env_var"
 		}
 	]
 }
 ```
 
-Config also could be generated with command:
+Supported keyfile types:
 
-```bash
-waggle server configure --keyfile dev.json --outfile config.json --password-type text_file
-```
+-   aws_secret (base64)
+-   env_var
+-   file
+
+Supported password types:
+
+-   aws_secret
+-   env_var
+-   plaintext
+-   file
 
 Run server:
 
 ```bash
 waggle server run --host 0.0.0.0 --config config.json
 ```
-
-Fetch

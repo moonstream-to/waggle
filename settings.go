@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -35,8 +35,14 @@ var (
 	CASER = cases.Title(language.English)
 )
 
+type ServerSignerConfigParsed struct {
+	Keyfile  []byte
+	Password string
+}
+
 type ServerSignerConfig struct {
-	KeyfilePath  string `json:"keyfile_path"`
+	Keyfile      string `json:"keyfile"`
+	KeyfileType  string `json:"keyfile_type"`
 	Password     string `json:"password"`
 	PasswordType string `json:"password_type"`
 }
@@ -46,13 +52,18 @@ type ServerConfig struct {
 	Signers          []ServerSignerConfig `json:"signers"`
 }
 
-// PasswordType specifies available password types
+type KeyfileType string
 type PasswordType string
 
 const (
-	PlainText PasswordType = "plaintext"
-	TextFile  PasswordType = "text_file"
-	AwsSecret PasswordType = "aws_secret"
+	AwsSecretKeyfile    KeyfileType = "aws_secret"
+	EnvVarKeyfilePath   KeyfileType = "env_var"
+	TextFileKeyfilePath KeyfileType = "file"
+
+	AwsSecretPassword PasswordType = "aws_secret"
+	EnvVarPassword    PasswordType = "env_var"
+	PlainTextPassword PasswordType = "plaintext"
+	TextFilePassword  PasswordType = "file"
 )
 
 func BadCharsCheck(input string) error {
@@ -65,127 +76,156 @@ func BadCharsCheck(input string) error {
 	return nil
 }
 
-// PasswordValidation validates provided string depends on password type.
-// It required bad character check since we are disable HTML escaping for json encoder.
-func (pt *PasswordType) PasswordValidation(password string) (string, error) {
-
-	switch *pt {
-	case PlainText:
-		return password, nil
-	case TextFile:
-		if badCharsCheckErr := BadCharsCheck(password); badCharsCheckErr != nil {
-			return "", badCharsCheckErr
-		}
-		absPasswordPath, pathCheckErr := filepath.Abs(password)
-		if pathCheckErr != nil {
-			return "", pathCheckErr
-		}
-		return absPasswordPath, nil
-	case AwsSecret:
-		if badCharsCheckErr := BadCharsCheck(password); badCharsCheckErr != nil {
-			return "", badCharsCheckErr
-		}
-		return password, nil
+func GetAwsSecret(name string) (string, error) {
+	if AWS_REGION == "" {
+		return "", fmt.Errorf("AWS_REGION is not specified")
 	}
 
-	return "", fmt.Errorf("unable ot validate password")
-}
-
-// ParseKeyfilePassword parses password for keyfile depends on password type.
-func (ssc *ServerSignerConfig) ParseKeyfilePassword() (string, error) {
-	var password string
-	switch ssc.PasswordType {
-	case string(PlainText):
-		password = ssc.Password
-	case string(TextFile):
-		_, osStatErr := os.Stat(ssc.Password)
-		if osStatErr != nil {
-			if os.IsNotExist(osStatErr) {
-				log.Printf("Signer ignored, file %s not found, err: %v\n", ssc.Password, osStatErr)
-				return "", osStatErr
-			}
-			log.Printf("Signer ignored, error due checking config path %s, err: %v\n", ssc.Password, osStatErr)
-			return "", osStatErr
-		}
-		passwordRaw, readErr := os.ReadFile(ssc.Password)
-		if readErr != nil {
-			return "", readErr
-		}
-		password = string(passwordRaw)
-	case string(AwsSecret):
-		if AWS_REGION == "" {
-			return "", fmt.Errorf("AWS_REGION is not specified")
-		}
-
-		awsConfig, awsConfigErr := config.LoadDefaultConfig(context.TODO(), config.WithRegion(AWS_REGION))
-		if awsConfigErr != nil {
-			return "", fmt.Errorf("AWS config load error, err: %v", awsConfigErr)
-		}
-
-		// Create Secrets Manager client
-		svc := secretsmanager.NewFromConfig(awsConfig)
-
-		input := &secretsmanager.GetSecretValueInput{
-			SecretId:     aws.String(ssc.Password),
-			VersionStage: aws.String("AWSCURRENT"), // VersionStage defaults to AWSCURRENT if unspecified
-		}
-
-		result, getSecretErr := svc.GetSecretValue(context.TODO(), input)
-		if getSecretErr != nil {
-			return "", fmt.Errorf("AWS get secret error, err: %v", getSecretErr.Error())
-		}
-
-		// Decrypts secret using the associated KMS key
-		password = *result.SecretString
+	awsConfig, awsConfigErr := config.LoadDefaultConfig(context.TODO(), config.WithRegion(AWS_REGION))
+	if awsConfigErr != nil {
+		return "", fmt.Errorf("AWS config load error, err: %v", awsConfigErr)
 	}
 
-	return password, nil
+	// Create Secrets Manager client
+	svc := secretsmanager.NewFromConfig(awsConfig)
+
+	input := &secretsmanager.GetSecretValueInput{
+		SecretId:     aws.String(name),
+		VersionStage: aws.String("AWSCURRENT"), // VersionStage defaults to AWSCURRENT if unspecified
+	}
+
+	result, getSecretErr := svc.GetSecretValue(context.TODO(), input)
+	if getSecretErr != nil {
+		return "", fmt.Errorf("AWS get secret error, err: %v", getSecretErr.Error())
+	}
+
+	// Decrypts secret using the associated KMS key
+	return *result.SecretString, nil
 }
 
-// ReadConfig parses list of configuration file paths to list of Application Probes configs
-func ReadServerConfig(rawConfigPath string) (*ServerConfig, error) {
-	var config ServerConfig
+func GetFileContent(path string) ([]byte, error) {
+	_, osStatErr := os.Stat(path)
+	if osStatErr != nil {
+		if os.IsNotExist(osStatErr) {
+			log.Printf("File %s not found, err: %v\n", path, osStatErr)
+			return nil, osStatErr
+		}
+		log.Printf("Error due checking config path %s, err: %v\n", path, osStatErr)
+		return nil, osStatErr
+	}
+	dataRaw, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return nil, readErr
+	}
 
+	return dataRaw, nil
+}
+
+// ParseKeyfileInput parses keyfile depends on keyfile type.
+func ParseKeyfileInput(input string, inputType KeyfileType) ([]byte, error) {
+	switch inputType {
+	case AwsSecretKeyfile:
+		if badCharsCheckErr := BadCharsCheck(input); badCharsCheckErr != nil {
+			return nil, badCharsCheckErr
+		}
+		keyfileRaw, getSsmErr := GetAwsSecret(input)
+		if getSsmErr != nil {
+			return nil, getSsmErr
+		}
+		keyfile, decodeErr := base64.StdEncoding.DecodeString(keyfileRaw)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		return keyfile, nil
+	case EnvVarKeyfilePath:
+		if badCharsCheckErr := BadCharsCheck(input); badCharsCheckErr != nil {
+			return nil, badCharsCheckErr
+		}
+		keyfilePath := os.Getenv(input)
+		if keyfilePath == "" {
+			return nil, fmt.Errorf("empty environment variable %s input", input)
+		}
+		keyfile, getFileErr := GetFileContent(keyfilePath)
+		return keyfile, getFileErr
+	case TextFileKeyfilePath:
+		if badCharsCheckErr := BadCharsCheck(input); badCharsCheckErr != nil {
+			return nil, badCharsCheckErr
+		}
+		keyfile, getFileErr := GetFileContent(input)
+		return keyfile, getFileErr
+	default:
+		return nil, fmt.Errorf("unsupported input type provided")
+	}
+}
+
+// ParsePasswordInput parses password for keyfile depends on password type.
+func ParsePasswordInput(input string, inputType PasswordType) (string, error) {
+	switch inputType {
+	case AwsSecretPassword:
+		if badCharsCheckErr := BadCharsCheck(input); badCharsCheckErr != nil {
+			return "", badCharsCheckErr
+		}
+		password, getSsmErr := GetAwsSecret(input)
+		return password, getSsmErr
+	case EnvVarPassword:
+		if badCharsCheckErr := BadCharsCheck(input); badCharsCheckErr != nil {
+			return "", badCharsCheckErr
+		}
+		password := os.Getenv(input)
+		if password == "" {
+			return "", fmt.Errorf("empty environment variable %s input", input)
+		}
+		return password, nil
+	case PlainTextPassword:
+		return input, nil
+	case TextFilePassword:
+		if badCharsCheckErr := BadCharsCheck(input); badCharsCheckErr != nil {
+			return "", badCharsCheckErr
+		}
+		password, getFileErr := GetFileContent(input)
+		return string(password), getFileErr
+	default:
+		return "", fmt.Errorf("unsupported input type provided")
+	}
+}
+
+// ReadConfig parses list of configuration file paths to list of Application configuration
+func ReadConfig(rawConfigPath string) ([]ServerSignerConfigParsed, string, error) {
 	configPath := strings.TrimSuffix(rawConfigPath, "/")
 	_, err := os.Stat(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("file %s not found, err: %v", configPath, err)
+			return nil, "", fmt.Errorf("file %s not found, err: %v", configPath, err)
 		}
-		return nil, fmt.Errorf("error due checking config path %s, err: %v", configPath, err)
+		return nil, "", fmt.Errorf("error due checking config path %s, err: %v", configPath, err)
 	}
 
 	rawBytes, err := os.ReadFile(configPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	configTemp := &ServerConfig{}
-	err = json.Unmarshal(rawBytes, configTemp)
+	configsTemp := &ServerConfig{}
+	err = json.Unmarshal(rawBytes, configsTemp)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	config.AccessResourceId = configTemp.AccessResourceId
-	for _, ct := range configTemp.Signers {
-		_, err := os.Stat(ct.KeyfilePath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				log.Printf("Signer ignored, file %s not found, err: %v\n", ct.KeyfilePath, err)
-				continue
-			}
-			log.Printf("Signer ignored, error due checking config path %s, err: %v\n", ct.KeyfilePath, err)
-			continue
+	configParsed := make([]ServerSignerConfigParsed, len(configsTemp.Signers)-1)
+	for _, s := range configsTemp.Signers {
+		keyfile, keyParseErr := ParseKeyfileInput(s.Keyfile, KeyfileType(s.KeyfileType))
+		if keyParseErr != nil {
+			return nil, "", keyParseErr
 		}
-		password, passParseErr := ct.ParseKeyfilePassword()
+
+		password, passParseErr := ParsePasswordInput(s.Password, PasswordType(s.PasswordType))
 		if passParseErr != nil {
-			continue
+			return nil, "", passParseErr
 		}
-		config.Signers = append(config.Signers, ServerSignerConfig{
-			KeyfilePath:  ct.KeyfilePath,
-			Password:     password,
-			PasswordType: ct.PasswordType,
+		configParsed = append(configParsed, ServerSignerConfigParsed{
+			Keyfile:  keyfile,
+			Password: password,
 		})
 	}
 
-	return &config, nil
+	return configParsed, configsTemp.AccessResourceId, nil
 }

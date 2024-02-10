@@ -57,6 +57,11 @@ func KeyfileFromPrivateKey(outfile string) error {
 	return err
 }
 
+func OpenKeystore(keystoreData []byte, password string) (*keystore.Key, error) {
+	key, err := keystore.DecryptKey(keystoreData, password)
+	return key, err
+}
+
 func KeyFromFile(keystoreFile string, password string) (*keystore.Key, error) {
 	var emptyKey *keystore.Key
 	keystoreContent, readErr := os.ReadFile(keystoreFile)
@@ -75,7 +80,7 @@ func KeyFromFile(keystoreFile string, password string) (*keystore.Key, error) {
 		password = string(passwordRaw)
 	}
 
-	key, err := keystore.DecryptKey(keystoreContent, password)
+	key, err := OpenKeystore(keystoreContent, password)
 	return key, err
 }
 

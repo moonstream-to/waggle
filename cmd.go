@@ -538,6 +538,7 @@ func CreateServerCommand() *cobra.Command {
 				return fmt.Errorf("no signers available")
 			}
 
+			log.Printf("Loaded authentification Brood resource with ID: %s", accessResourceId)
 			availableSigners := make(map[string]AvailableSigner)
 			for _, c := range configParsed {
 				key, keyErr := OpenKeystore(c.Keyfile, c.Password)

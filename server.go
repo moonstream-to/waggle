@@ -125,8 +125,6 @@ func (server *Server) accessMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// TODO(kompotkot): Add background task to fetch user ID and log it
-
 		authorizationContext := AuthorizationContext{
 			AuthorizationToken:    authorizationToken,
 			AccessResourceHolders: accessResourceHolders,

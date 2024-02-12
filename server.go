@@ -75,7 +75,8 @@ type AccessLevel struct {
 }
 
 type AuthorizationContext struct {
-	AuthorizationToken string
+	AuthorizationToken    string
+	AccessResourceHolders ResourceHolders
 }
 
 // Check access id was provided correctly and save user access configuration to request context
@@ -105,7 +106,7 @@ func (server *Server) accessMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		access, statusCode, checkAccessErr := server.BugoutAPIClient.CheckAccessToResource(authorizationToken, server.AccessResourceId)
+		accessResourceHolders, statusCode, checkAccessErr := server.BugoutAPIClient.CheckAccessToResource(authorizationToken, server.AccessResourceId)
 		if checkAccessErr != nil {
 			log.Println(statusCode, checkAccessErr)
 			switch statusCode {
@@ -119,15 +120,14 @@ func (server *Server) accessMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if len(access.Holders) < 1 {
+		if len(accessResourceHolders.Holders) < 1 {
 			http.Error(w, "Access restricted", http.StatusForbidden)
 			return
 		}
 
-		// TODO(kompotkot): Add background task to fetch user ID and log it
-
 		authorizationContext := AuthorizationContext{
-			AuthorizationToken: authorizationToken,
+			AuthorizationToken:    authorizationToken,
+			AccessResourceHolders: accessResourceHolders,
 		}
 
 		ctxUser := context.WithValue(r.Context(), "authorizationContext", authorizationContext)
@@ -229,6 +229,67 @@ func (server *Server) versionRoute(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	response := VersionResponse{Version: WAGGLE_VERSION}
 	json.NewEncoder(w).Encode(response)
+}
+
+func (server *Server) holdersHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		server.holdersRoute(w, r)
+		return
+	case http.MethodPost:
+		server.modifyHolderAccessRoute(w, r, "POST")
+		return
+	case http.MethodDelete:
+		server.modifyHolderAccessRoute(w, r, "DELETE")
+		return
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func (server *Server) holdersRoute(w http.ResponseWriter, r *http.Request) {
+	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
+	accessResourceHolders := authorizationContext.AccessResourceHolders
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(accessResourceHolders.Holders)
+}
+
+func (server *Server) modifyHolderAccessRoute(w http.ResponseWriter, r *http.Request, method string) {
+	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
+	authorizationToken := authorizationContext.AuthorizationToken
+
+	body, readErr := io.ReadAll(r.Body)
+	if readErr != nil {
+		http.Error(w, "Unable to read body", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	if len(body) > 0 {
+		defer r.Body.Close()
+	}
+	var req *RequestResourceHolder
+	parseErr := json.Unmarshal(body, &req)
+	if parseErr != nil {
+		http.Error(w, "Unable to parse body", http.StatusBadRequest)
+	}
+
+	accessResourceHolders, statusCode, checkAccessErr := server.BugoutAPIClient.ModifyAccessToResource(authorizationToken, server.AccessResourceId, method, req)
+	if checkAccessErr != nil {
+		log.Println(statusCode, checkAccessErr)
+		switch statusCode {
+		case 404:
+			http.Error(w, "Not Found", http.StatusNotFound)
+		case 400, 401, 403:
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		default:
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(accessResourceHolders.Holders)
 }
 
 func (server *Server) signersHandler(w http.ResponseWriter, r *http.Request) {
@@ -350,6 +411,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 func (server *Server) Serve() error {
 	serveMux := http.NewServeMux()
 	serveMux.Handle("/signers/", server.accessMiddleware(http.HandlerFunc(server.signersHandler)))
+	serveMux.Handle("/holders", server.accessMiddleware(http.HandlerFunc(server.holdersHandler)))
 	serveMux.HandleFunc("/ping", server.pingRoute)
 	serveMux.HandleFunc("/version", server.versionRoute)
 

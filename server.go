@@ -139,27 +139,25 @@ func (server *Server) accessMiddleware(next http.Handler) http.Handler {
 // CORS middleware
 func (server *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			var allowedOrigin string
-			if server.CORSWhitelist["*"] {
-				allowedOrigin = "*"
-			} else {
-				for o := range server.CORSWhitelist {
-					if r.Header.Get("Origin") == o {
-						allowedOrigin = o
-					}
+		var allowedOrigin string
+		if server.CORSWhitelist["*"] {
+			allowedOrigin = "*"
+		} else {
+			for o := range server.CORSWhitelist {
+				if r.Header.Get("Origin") == o {
+					allowedOrigin = o
 				}
 			}
-			// If origin in list of CORS allowed origins, extend with required headers
-			if allowedOrigin != "" {
-				w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-				w.Header().Set("Access-Control-Allow-Methods", "GET,POST")
-				// Credentials are cookies, authorization headers, or TLS client certificates
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			}
-			w.WriteHeader(http.StatusNoContent)
-			return
+		}
+		if allowedOrigin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		}
+
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+			// Credentials are cookies, authorization headers, or TLS client certificates
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization")
 		}
 		next.ServeHTTP(w, r)
 	})

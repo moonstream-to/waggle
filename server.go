@@ -143,22 +143,25 @@ func (server *Server) corsMiddleware(next http.Handler) http.Handler {
 		if server.CORSWhitelist["*"] {
 			allowedOrigin = "*"
 		} else {
-			for o := range server.CORSWhitelist {
-				if r.Header.Get("Origin") == o {
-					allowedOrigin = o
-				}
+			origin := r.Header.Get("Origin")
+			if _, ok := server.CORSWhitelist[origin]; ok {
+				allowedOrigin = origin
 			}
 		}
+
 		if allowedOrigin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-		}
-
-		if r.Method == "OPTIONS" {
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
 			// Credentials are cookies, authorization headers, or TLS client certificates
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		}
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }

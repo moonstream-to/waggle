@@ -250,7 +250,7 @@ type User struct {
 func (c *BugoutAPIClient) FindUser(token, userId string) (User, int, error) {
 	var user User
 	var requestBodyBytes []byte
-	request, requestErr := http.NewRequest("GET", fmt.Sprintf("%s/user/find2?user_id=%s", c.BroodBaseURL, userId), bytes.NewBuffer(requestBodyBytes))
+	request, requestErr := http.NewRequest("GET", fmt.Sprintf("%s/user/find?user_id=%s", c.BroodBaseURL, userId), bytes.NewBuffer(requestBodyBytes))
 	if requestErr != nil {
 		return user, 500, requestErr
 	}

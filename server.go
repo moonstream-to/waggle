@@ -484,8 +484,8 @@ func (server *Server) Serve() error {
 	s := http.Server{
 		Addr:         fmt.Sprintf("%s:%d", server.Host, server.Port),
 		Handler:      commonHandler,
-		ReadTimeout:  40 * time.Second,
-		WriteTimeout: 40 * time.Second,
+		ReadTimeout:  180 * time.Second,
+		WriteTimeout: 180 * time.Second,
 	}
 
 	log.Printf("Starting node load balancer HTTP server at %s:%d", server.Host, server.Port)

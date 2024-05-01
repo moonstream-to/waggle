@@ -260,7 +260,7 @@ func (server *Server) holdersRoute(w http.ResponseWriter, r *http.Request) {
 
 	sem := make(chan struct{}, 3)
 	var wg sync.WaitGroup
-	
+
 	// Extend holders with names and additional data
 	for i, h := range accessResourceHolders.Holders {
 		wg.Add(1)
@@ -415,7 +415,16 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
-	callRequests := make([]CallRequestSpecification, len(req.Requests))
+	// TODO:!!!!!!!!!
+	// TODO:!!!!!!!!!
+	batchSize := 2 // 100
+	// TODO:!!!!!!!!!
+	// TODO:!!!!!!!!!
+
+	callRequestsLen := len(req.Requests)
+	var callRequestBatches [][]CallRequestSpecification
+	var currentBatch []CallRequestSpecification
+
 	for i, message := range req.Requests {
 		messageHash, hashErr := DropperClaimMessageHash(int64(req.ChainId), req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
 		if hashErr != nil {
@@ -433,7 +442,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
 
 		if !req.NoMetatx {
-			callRequests[i] = CallRequestSpecification{
+			currentBatch = append(currentBatch, CallRequestSpecification{
 				Caller:    message.Claimant,
 				Method:    "claim",
 				RequestId: message.RequestID,
@@ -444,6 +453,11 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 					Signer:        signer,
 					Signature:     message.Signature,
 				},
+			})
+
+			if (i+1)%batchSize == 0 || i == callRequestsLen-1 {
+				callRequestBatches = append(callRequestBatches, currentBatch)
+				currentBatch = nil // Reset the batch
 			}
 		}
 	}
@@ -456,16 +470,19 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		Requests: req.Requests,
 	}
 
-	if !req.NoMetatx {
-		createReqErr := server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, callRequests, 100, 1)
-		if createReqErr == nil {
-			log.Printf("New %d call_requests registered at metatx for %s", len(callRequests), req.Dropper)
-			resp.MetatxRegistered = true
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+
+	if !req.NoMetatx {
+		go func() {
+			createReqErr := server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, callRequestBatches)
+			if createReqErr == nil {
+				log.Printf("New %d call_requests registered at metatx for %s", callRequestsLen, req.Dropper)
+				resp.MetatxRegistered = true
+			}
+		}()
+	}
+
 }
 
 // Serve handles server run

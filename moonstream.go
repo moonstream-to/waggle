@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -196,10 +197,11 @@ func (client *MoonstreamEngineAPIClient) ListCallRequests(accessToken, contractI
 }
 
 // sendCallRequests sends a POST request to metatx API
-func (client *MoonstreamEngineAPIClient) sendCallRequests(accessToken string, requestBodyBytes []byte) error {
-	request, requestCreationErr := http.NewRequest("POST", fmt.Sprintf("%s/metatx/requests", client.BaseURL), bytes.NewBuffer(requestBodyBytes))
+func (client *MoonstreamEngineAPIClient) sendCallRequests(accessToken string, requestBodyBytes []byte) (int, string) {
+	request, requestCreationErr := http.NewRequest("POST", fmt.Sprintf("%s/metatx/requests?verify=true", client.BaseURL), bytes.NewBuffer(requestBodyBytes))
 	if requestCreationErr != nil {
-		return requestCreationErr
+		log.Printf("Unable to create request, error: %v", requestCreationErr)
+		return 500, ""
 	}
 
 	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", accessToken))
@@ -208,21 +210,18 @@ func (client *MoonstreamEngineAPIClient) sendCallRequests(accessToken string, re
 
 	response, responseErr := client.HTTPClient.Do(request)
 	if responseErr != nil {
-		return responseErr
+		log.Printf("Unable to do request, error: %v", responseErr)
+		return 500, ""
 	}
 	defer response.Body.Close()
 
 	responseBody, responseBodyErr := io.ReadAll(response.Body)
-
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		if responseBodyErr != nil {
-			return fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, responseBodyErr.Error())
-		}
-		responseBodyString := string(responseBody)
-		return fmt.Errorf("unexpected status code: %d -- response body: %s", response.StatusCode, responseBodyString)
+	if responseBodyErr != nil {
+		log.Printf("Unable to parse response body, error: %v", responseBodyErr)
+		return response.StatusCode, ""
 	}
 
-	return nil
+	return response.StatusCode, string(responseBody)
 }
 
 func (client *MoonstreamEngineAPIClient) CreateCallRequests(
@@ -230,19 +229,10 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(
 	contractId,
 	contractAddress string,
 	ttlDays int,
-	specs []CallRequestSpecification, batchSize, retries int,
+	specBatches [][]CallRequestSpecification,
 ) error {
 	if contractId == "" && contractAddress == "" {
 		return fmt.Errorf("you must specify at least one of contractId or contractAddress when creating call requests")
-	}
-
-	var specBatches [][]CallRequestSpecification
-	for i := 0; i <= len(specs); i += batchSize {
-		if i+batchSize > len(specs) {
-			specBatches = append(specBatches, specs[i:])
-			break
-		}
-		specBatches = append(specBatches, specs[i:i+batchSize])
 	}
 
 	for i, batchSpecs := range specBatches {
@@ -264,23 +254,15 @@ func (client *MoonstreamEngineAPIClient) CreateCallRequests(
 			return requestBodyBytesErr
 		}
 
-		sendReTryCnt := 1
-	SEND_RETRY:
-		for sendReTryCnt <= retries {
-			sendCallRequestsErr := client.sendCallRequests(accessToken, requestBodyBytes)
-			if sendCallRequestsErr == nil {
-				break SEND_RETRY
-			}
-			fmt.Printf("During sending call requests an error ocurred: %v, retry %d\n", sendCallRequestsErr, sendReTryCnt)
-			sendReTryCnt++
-			time.Sleep(time.Duration(sendReTryCnt) * time.Second)
-
-			if sendReTryCnt > retries {
-				return fmt.Errorf("failed to send call requests")
-			}
+		statusCode, responseBodyStr := client.sendCallRequests(accessToken, requestBodyBytes)
+		if statusCode == 200 {
+			fmt.Printf("Successfully pushed %d batch of %d total with %d call_requests to API\n", i+1, len(specBatches), len(batchSpecs))
+		} else if statusCode == 409 {
+			fmt.Printf("During sending call requests an error ocurred: %v\n", responseBodyStr)
+		} else {
+			fmt.Printf("ERROR")
+			return nil
 		}
-
-		fmt.Printf("Successfully pushed %d batch of %d total with %d call_requests to API\n", i+1, len(specBatches), len(batchSpecs))
 	}
 
 	return nil

@@ -395,7 +395,7 @@ func CreateMoonstreamCommand() *cobra.Command {
 	}
 
 	var blockchain, address, contractType, contractId, contractAddress, infile string
-	var limit, offset, batchSize, retries int
+	var limit, offset, batchSize int
 	var showExpired bool
 
 	contractsSubcommand := &cobra.Command{
@@ -486,9 +486,12 @@ func CreateMoonstreamCommand() *cobra.Command {
 				return parseErr
 			}
 
-			callRequests := make([]CallRequestSpecification, len(messages))
+			batchSize := 100
+			callRequestsLen := len(messages)
+			var callRequestBatches [][]CallRequestSpecification
+			var currentBatch []CallRequestSpecification
 			for i, message := range messages {
-				callRequests[i] = CallRequestSpecification{
+				currentBatch = append(currentBatch, CallRequestSpecification{
 					Caller:    message.Claimant,
 					Method:    "claim",
 					RequestId: message.RequestID,
@@ -499,10 +502,15 @@ func CreateMoonstreamCommand() *cobra.Command {
 						Signer:        message.Signer,
 						Signature:     message.Signature,
 					},
+				})
+
+				if (i+1)%batchSize == 0 || i == callRequestsLen-1 {
+					callRequestBatches = append(callRequestBatches, currentBatch)
+					currentBatch = nil // Reset the batch
 				}
 			}
 
-			err := client.CreateCallRequests(MOONSTREAM_ACCESS_TOKEN, contractId, contractAddress, limit, callRequests, batchSize, retries)
+			err := client.CreateCallRequests(MOONSTREAM_ACCESS_TOKEN, contractId, contractAddress, limit, callRequestBatches)
 			return err
 		},
 	}
@@ -511,7 +519,6 @@ func CreateMoonstreamCommand() *cobra.Command {
 	createCallRequestsSubcommand.Flags().IntVar(&limit, "ttl-days", 30, "Number of days for which request will remain active")
 	createCallRequestsSubcommand.Flags().StringVar(&infile, "infile", "", "Input file. If not specified, input will be expected from stdin.")
 	createCallRequestsSubcommand.Flags().IntVar(&batchSize, "batch-size", 100, "Number of rows per request to API")
-	createCallRequestsSubcommand.Flags().IntVar(&retries, "retries", 1, "Number of retries for failed requests")
 
 	moonstreamCommand.AddCommand(contractsSubcommand, callRequestsSubcommand, createCallRequestsSubcommand)
 

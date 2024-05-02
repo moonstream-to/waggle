@@ -490,11 +490,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 
 	if req.Metatx != "" && checkStatusCode == 200 {
 		go func() {
-			// TODO:!!!!!!!!!
-			// TODO:!!!!!!!!!
-			batchSize := 2 // 100
-			// TODO:!!!!!!!!!
-			// TODO:!!!!!!!!!
+			batchSize := 100
 
 			var ignoredCallRequestsTuple [][]string // (call_request_id, caller) which already presented in database
 			var failedCallRequestsTuple [][]string  // (call_request_id, caller) which failed during write operation

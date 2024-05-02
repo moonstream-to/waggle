@@ -510,8 +510,40 @@ func CreateMoonstreamCommand() *cobra.Command {
 				}
 			}
 
-			err := client.CreateCallRequests(MOONSTREAM_ACCESS_TOKEN, contractId, contractAddress, limit, callRequestBatches)
-			return err
+			if contractId == "" && contractAddress == "" {
+				return fmt.Errorf("you must specify at least one of contractId or contractAddress when creating call requests")
+			}
+
+			for i, batchSpecs := range callRequestBatches {
+				requestBody := CreateCallRequestsRequest{
+					TTLDays:        limit,
+					Specifications: batchSpecs,
+				}
+
+				if contractId != "" {
+					requestBody.ContractID = contractId
+				}
+
+				if contractAddress != "" {
+					requestBody.ContractAddress = contractAddress
+				}
+
+				requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)
+				if requestBodyBytesErr != nil {
+					return requestBodyBytesErr
+				}
+
+				statusCode, responseBodyStr := client.sendCallRequests(MOONSTREAM_ACCESS_TOKEN, requestBodyBytes)
+				if statusCode == 200 {
+					fmt.Printf("Successfully pushed %d batch of %d total with %d call_requests to API\n", i+1, len(callRequestBatches), len(batchSpecs))
+				} else if statusCode == 409 {
+					fmt.Printf("During sending call requests an error ocurred: %v\n", responseBodyStr)
+				} else {
+					fmt.Printf("During sending call requests an error ocurred: %v\n", responseBodyStr)
+				}
+			}
+
+			return nil
 		},
 	}
 	createCallRequestsSubcommand.Flags().StringVar(&contractId, "contract-id", "", "Moonstream Engine ID of the registered contract")

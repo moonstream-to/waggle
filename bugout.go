@@ -363,3 +363,64 @@ func (c *BugoutAPIClient) ModifyAccessToResource(token, resourceId, method strin
 
 	return resourceHolders, response.StatusCode, nil
 }
+
+type JobEntryContent struct {
+	IgnoredCallRequests  [][]string `json:"ignored_call_requests"`
+	FailedCallRequests   [][]string `json:"failed_call_requests"`
+	PushedCallRequestIds []string   `json:"pushed_call_request_ids"`
+}
+
+type RequestJobEntry struct {
+	Title   string   `json:"title"`
+	Content string   `json:"content"`
+	Tags    []string `json:"tags"`
+}
+
+func (c *BugoutAPIClient) WriteJobToJournal(signer string, pushedCallRequestIds []string, ignoredCallRequests, failedCallRequests [][]string) (int, error) {
+	tags := []string{
+		"type:job",
+		fmt.Sprintf("signer:%s", signer),
+		fmt.Sprintf("waggle_version:%s", WAGGLE_VERSION),
+	}
+	if len(ignoredCallRequests) != 0 {
+		tags = append(tags, "ignored:true")
+	}
+	if len(ignoredCallRequests) != 0 {
+		tags = append(tags, "failed:true")
+	}
+
+	jobEntryContent := &JobEntryContent{
+		IgnoredCallRequests:  ignoredCallRequests,
+		FailedCallRequests:   failedCallRequests,
+		PushedCallRequestIds: pushedCallRequestIds,
+	}
+	jobEntryContentStr, marshalErr := json.Marshal(jobEntryContent)
+	if marshalErr != nil {
+		return 0, marshalErr
+	}
+
+	requestBody := RequestJobEntry{
+		Title:   fmt.Sprintf("job - signer %s", signer),
+		Content: string(jobEntryContentStr),
+		Tags:    tags,
+	}
+	reqBodyBytes := new(bytes.Buffer)
+	json.NewEncoder(reqBodyBytes).Encode(requestBody)
+
+	request, requestErr := http.NewRequest("POST", fmt.Sprintf("%s/journals/%s/entries", c.SpireBaseURL, MOONSTREAM_METATX_JOBS_JOURNAL_ID), reqBodyBytes)
+	if requestErr != nil {
+		return 0, requestErr
+	}
+
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", MOONSTREAM_WAGGLE_ADMIN_ACCESS_TOKEN))
+	request.Header.Add("Accept", "application/json")
+	request.Header.Add("Content-Type", "application/json")
+
+	response, responseErr := c.HTTPClient.Do(request)
+	if responseErr != nil {
+		return 0, responseErr
+	}
+	defer response.Body.Close()
+
+	return response.StatusCode, nil
+}

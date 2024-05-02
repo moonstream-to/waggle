@@ -413,6 +413,16 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
+	metatx := ""
+	switch req.Metatx {
+	case "ignore":
+		metatx = "ignore"
+	case "sign_only":
+		metatx = "sign_only"
+	default:
+		metatx = ""
+	}
+
 	var callRequestSpecifications []CallRequestSpecification
 	for _, message := range req.Requests {
 		messageHash, hashErr := DropperClaimMessageHash(int64(req.ChainId), req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
@@ -430,7 +440,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		message.Signature = hex.EncodeToString(signedMessage)
 		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
 
-		if req.Metatx != "" {
+		if metatx != "sign_only" {
 			callRequestSpecifications = append(callRequestSpecifications, CallRequestSpecification{
 				Caller:    message.Claimant,
 				Method:    "claim",
@@ -449,7 +459,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 	var wg sync.WaitGroup
 	var checkStatusCode int
 	var existingRequests CallRequestsCheck
-	if req.Metatx != "" {
+	if metatx != "sign_only" {
 		wg.Add(1)
 		go func(wg *sync.WaitGroup) {
 			defer wg.Done()
@@ -458,7 +468,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		}(&wg)
 	}
 
-	if req.Metatx == "strict" {
+	if metatx == "" {
 		wg.Wait()
 
 		if len(existingRequests.ExistingRequests) != 0 {
@@ -488,7 +498,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 
 	wg.Wait()
 
-	if req.Metatx != "" && checkStatusCode == 200 {
+	if metatx != "sign_only" && checkStatusCode == 200 {
 		go func() {
 			batchSize := 100
 
@@ -529,7 +539,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 
 				requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)
 				if requestBodyBytesErr != nil {
-					log.Printf("Unable to marshal body, errod: %v", requestBodyBytesErr)
+					log.Printf("Unable to marshal body, error: %v", requestBodyBytesErr)
 					return
 				}
 

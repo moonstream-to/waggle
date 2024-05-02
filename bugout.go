@@ -380,12 +380,11 @@ func (c *BugoutAPIClient) WriteJobToJournal(signer string, pushedCallRequestIds 
 	tags := []string{
 		"type:job",
 		fmt.Sprintf("signer:%s", signer),
-		fmt.Sprintf("waggle_version:%s", WAGGLE_VERSION),
 	}
 	if len(ignoredCallRequests) != 0 {
 		tags = append(tags, "ignored:true")
 	}
-	if len(ignoredCallRequests) != 0 {
+	if len(failedCallRequests) != 0 {
 		tags = append(tags, "failed:true")
 	}
 

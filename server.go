@@ -502,9 +502,9 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		go func() {
 			batchSize := 100
 
-			var ignoredCallRequestsTuple [][]string // (call_request_id, caller) which already presented in database
-			var failedCallRequestsTuple [][]string  // (call_request_id, caller) which failed during write operation
-			var pushedCallRequestIds []string       // successfully pushed call_request_id's to database
+			ignoredCallRequestsTuple := [][]string{} // (call_request_id, caller) which already presented in database
+			failedCallRequestsTuple := [][]string{}  // (call_request_id, caller) which failed during write operation
+			pushedCallRequestIds := []string{}       // successfully pushed call_request_id's to database
 
 			var currentBatch []CallRequestSpecification
 			var callRequestBatches [][]CallRequestSpecification

@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -357,18 +358,29 @@ func (server *Server) modifyHolderAccessRoute(w http.ResponseWriter, r *http.Req
 }
 
 func (server *Server) signersHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
+	if r.Method == http.MethodGet && r.URL.Path == "/signers/" {
 		server.signersRoute(w, r)
 		return
-	case http.MethodPost:
-		routePathSlice := strings.Split(r.URL.Path, "/")
-		requestedSigner := common.HexToAddress(routePathSlice[2]).String()
-		_, ok := server.AvailableSigners[requestedSigner]
-		if !ok {
-			http.Error(w, fmt.Sprintf("Unacceptable signer provided %s", requestedSigner), http.StatusBadRequest)
+	}
+
+	routePathSlice := strings.Split(r.URL.Path, "/")
+	requestedSigner := common.HexToAddress(routePathSlice[2]).String()
+	_, ok := server.AvailableSigners[requestedSigner]
+	if !ok {
+		http.Error(w, fmt.Sprintf("Unacceptable signer provided %s", requestedSigner), http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		switch {
+		case strings.Contains(r.URL.Path, "/jobs"):
+			server.jobsRoute(w, r, requestedSigner)
+			return
+		default:
+			http.Error(w, "Not found", http.StatusNotFound)
 			return
 		}
+	case http.MethodPost:
 		switch {
 		case strings.Contains(r.URL.Path, "/dropper/sign"):
 			// TODO: (kompotkot): Re-write in subroutes and subapps when times come
@@ -395,6 +407,37 @@ func (server *Server) signersRoute(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(SignersResponse{
 		Signers: signers,
 	})
+}
+
+func (server *Server) jobsRoute(w http.ResponseWriter, r *http.Request, signer string) {
+	limit := 10
+	offset := 0
+	queryIntParams := []string{"limit", "offset"}
+	for _, qp := range queryIntParams {
+		qpRaw := r.URL.Query().Get(qp)
+		if qpRaw != "" {
+			qpVal, err := strconv.Atoi(qpRaw)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Unable to parse %s as integer", qp), http.StatusBadRequest)
+				return
+			}
+			switch qp {
+			case "limit":
+				limit = qpVal
+			case "offset":
+				offset = qpVal
+			}
+		}
+	}
+
+	jobs, searchErr := SearchJobsInJournal(&server.BugoutAPIClient.BugoutSpireClient, signer, limit, offset)
+	if searchErr != nil {
+		http.Error(w, searchErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(jobs)
 }
 
 // signDropperRoute sign dropper call requests

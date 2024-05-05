@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -370,6 +371,79 @@ func (c *BugoutAPIClient) ModifyAccessToResource(token, resourceId, method strin
 	return resourceHolders, response.StatusCode, nil
 }
 
+type JobEntryContent struct {
+	FailedCallRequests   []string `json:"failed_call_requests"`
+	PushedCallRequestIds []string `json:"pushed_call_request_ids"`
+
+	ContentParseError bool   `json:"content_parse_error,omitempty"`
+	ContentRaw        string `json:"content_raw,omitempty"`
+}
+
+type RequestJobEntry struct {
+	Title   string   `json:"title"`
+	Content string   `json:"content"`
+	Tags    []string `json:"tags"`
+}
+
+type JobResponse struct {
+	JobEntryUrl string          `json:"job_entry_url,omitempty"`
+	Title       string          `json:"title"`
+	Content     JobEntryContent `json:"content"`
+	Tags        []string        `json:"tags"`
+	CreatedAt   string          `json:"created_at"`
+	UpdatedAt   string          `json:"updated_at"`
+}
+
+type JobsResponse struct {
+	Signer       string        `json:"signer"`
+	TotalResults int           `json:"total_results"`
+	Offset       int           `json:"offset,omitempty"`
+	NextOffset   int           `json:"next_offset,omitempty"`
+	Jobs         []JobResponse `json:"jobs"`
+}
+
+func SearchJobsInJournal(client *spire.SpireClient, signer string, limit, offset int) (*JobsResponse, error) {
+	searchQuery := fmt.Sprintf("tag:signer:%s", signer)
+	parameters := map[string]string{
+		"content": "true",
+	}
+	entryResultsPage, searchErr := client.SearchEntries(MOONSTREAM_WAGGLE_ADMIN_ACCESS_TOKEN, MOONSTREAM_METATX_JOBS_JOURNAL_ID, searchQuery, limit, offset, parameters)
+	if searchErr != nil {
+		return nil, searchErr
+	}
+
+	jobsResponse := JobsResponse{
+		Signer:       signer,
+		TotalResults: entryResultsPage.TotalResults,
+		Offset:       entryResultsPage.Offset,
+		NextOffset:   entryResultsPage.NextOffset,
+	}
+
+	for _, r := range entryResultsPage.Results {
+		var jobEntryContent JobEntryContent
+		unmarshalErr := json.Unmarshal([]byte(r.Content), &jobEntryContent)
+		if unmarshalErr != nil {
+			log.Printf("Unable to parse content for entry %s, error: %v", r.Url, unmarshalErr)
+			jobEntryContent = JobEntryContent{
+				ContentParseError: true,
+				ContentRaw:        r.Content,
+			}
+		}
+
+		job := JobResponse{
+			JobEntryUrl: r.Url,
+			Title:       r.Title,
+			Content:     jobEntryContent,
+			Tags:        r.Tags,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+		}
+		jobsResponse.Jobs = append(jobsResponse.Jobs, job)
+	}
+
+	return &jobsResponse, searchErr
+}
+
 func CreateJobInJournal(client *spire.SpireClient, signer string) (*spire.Entry, error) {
 	title := fmt.Sprintf("draft job - signer %s", signer)
 	entryContext := spire.EntryContext{
@@ -384,17 +458,6 @@ func CreateJobInJournal(client *spire.SpireClient, signer string) (*spire.Entry,
 	jobEntry, err := client.CreateEntry(MOONSTREAM_WAGGLE_ADMIN_ACCESS_TOKEN, MOONSTREAM_METATX_JOBS_JOURNAL_ID, title, content, tags, entryContext)
 
 	return &jobEntry, err
-}
-
-type JobEntryContent struct {
-	FailedCallRequests   []string `json:"failed_call_requests"`
-	PushedCallRequestIds []string `json:"pushed_call_request_ids"`
-}
-
-type RequestJobEntry struct {
-	Title   string   `json:"title"`
-	Content string   `json:"content"`
-	Tags    []string `json:"tags"`
 }
 
 func (c *BugoutAPIClient) UpdateJobInJournal(entryId, signer string, pushedCallRequestIds, failedCallRequests []string) (int, error) {

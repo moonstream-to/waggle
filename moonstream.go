@@ -201,7 +201,7 @@ func (client *MoonstreamEngineAPIClient) ListCallRequests(accessToken, contractI
 }
 
 func (client *MoonstreamEngineAPIClient) checkCallRequests(accessToken string, contractId,
-	contractAddress string, callRequests []CallRequestSpecification) (int, CallRequestsCheck) {
+	contractAddress string, callRequests []CallRequestSpecification) (int, CallRequestsCheck, string) {
 	var callRequestsCheck CallRequestsCheck
 
 	requestBody := CreateCallRequestsRequest{
@@ -219,13 +219,13 @@ func (client *MoonstreamEngineAPIClient) checkCallRequests(accessToken string, c
 	requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)
 	if requestBodyBytesErr != nil {
 		log.Printf("Unable to prepare request body, error: %v", requestBodyBytesErr)
-		return 0, callRequestsCheck
+		return 0, callRequestsCheck, ""
 	}
 
 	request, requestCreationErr := http.NewRequest("GET", fmt.Sprintf("%s/metatx/requests/check", client.BaseURL), bytes.NewBuffer(requestBodyBytes))
 	if requestCreationErr != nil {
 		log.Printf("Unable to create request, error: %v", requestCreationErr)
-		return 0, callRequestsCheck
+		return 0, callRequestsCheck, ""
 	}
 
 	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", accessToken))
@@ -235,23 +235,27 @@ func (client *MoonstreamEngineAPIClient) checkCallRequests(accessToken string, c
 	response, responseErr := client.HTTPClient.Do(request)
 	if responseErr != nil {
 		log.Printf("Unable to do request, error: %v", responseErr)
-		return 0, callRequestsCheck
+		return 0, callRequestsCheck, ""
 	}
 	defer response.Body.Close()
 
 	responseBody, responseBodyErr := io.ReadAll(response.Body)
 	if responseBodyErr != nil {
 		log.Printf("Unable to parse response body, error: %v", responseBodyErr)
-		return response.StatusCode, callRequestsCheck
+		return response.StatusCode, callRequestsCheck, response.Status
+	}
+
+	if response.StatusCode != 200 {
+		return response.StatusCode, callRequestsCheck, string(responseBody)
 	}
 
 	unmarshalErr := json.Unmarshal(responseBody, &callRequestsCheck)
 	if unmarshalErr != nil {
 		log.Printf("Could not parse response body, error: %s", unmarshalErr)
-		return response.StatusCode, callRequestsCheck
+		return response.StatusCode, callRequestsCheck, response.Status
 	}
 
-	return response.StatusCode, callRequestsCheck
+	return response.StatusCode, callRequestsCheck, response.Status
 }
 
 // sendCallRequests sends a POST request to metatx API
@@ -259,7 +263,7 @@ func (client *MoonstreamEngineAPIClient) sendCallRequests(accessToken string, re
 	request, requestCreationErr := http.NewRequest("POST", fmt.Sprintf("%s/metatx/requests", client.BaseURL), bytes.NewBuffer(requestBodyBytes))
 	if requestCreationErr != nil {
 		log.Printf("Unable to create request, error: %v", requestCreationErr)
-		return 500, ""
+		return 0, ""
 	}
 
 	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", accessToken))
@@ -269,7 +273,7 @@ func (client *MoonstreamEngineAPIClient) sendCallRequests(accessToken string, re
 	response, responseErr := client.HTTPClient.Do(request)
 	if responseErr != nil {
 		log.Printf("Unable to do request, error: %v", responseErr)
-		return 500, ""
+		return 0, ""
 	}
 	defer response.Body.Close()
 

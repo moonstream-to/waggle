@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	spire "github.com/bugout-dev/bugout-go/pkg/spire"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
@@ -66,6 +67,10 @@ type SignDropperResponse struct {
 	TtlDays  int                    `json:"ttl_days"`
 	Sensible bool                   `json:"sensible"`
 	Requests []*DropperClaimMessage `json:"requests"`
+
+	MetatxRegistered bool   `json:"metatx_registered"`
+	JobEntryId       string `json:"job_entry_id,omitempty"`
+	JobEntryUrl      string `json:"job_entry_url,omitempty"`
 }
 
 type AccessLevel struct {
@@ -439,7 +444,8 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
 
 		if !req.NoMetatx {
-			callRequestSpecifications = append(callRequestSpecifications, CallRequestSpecification{
+			// If no_metatx key not provided with request, prepare slices for push to metatx call requests creation endpoint
+			newCallRequest := CallRequestSpecification{
 				Caller:    message.Claimant,
 				Method:    "claim",
 				RequestId: message.RequestID,
@@ -450,8 +456,9 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 					Signer:        signer,
 					Signature:     message.Signature,
 				},
-			})
-
+			}
+			callRequestSpecifications = append(callRequestSpecifications, newCallRequest)
+			currentBatch = append(currentBatch, newCallRequest)
 			if (i+1)%batchSize == 0 || i == callRequestsLen-1 {
 				if currentBatch != nil {
 					callRequestBatches = append(callRequestBatches, currentBatch)
@@ -461,12 +468,14 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		}
 	}
 
-	var checkStatusCode int
-	var existingRequests CallRequestsCheck
+	// Run check of existing call_requests in database
 	if !req.NoMetatx && !req.NoCheckMetatx {
-		checkStatusCode, existingRequests = server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, "", req.Dropper, callRequestSpecifications)
+		checkStatusCode, existingRequests, checkStatus := server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, "", req.Dropper, callRequestSpecifications)
 
-		if checkStatusCode == 200 {
+		if checkStatusCode == 0 {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		} else if checkStatusCode == 200 {
 			if len(existingRequests.ExistingRequests) != 0 {
 				var existingReqIds string
 				for i, r := range existingRequests.ExistingRequests {
@@ -480,7 +489,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 				return
 			}
 		} else {
-			http.Error(w, fmt.Sprintf("Unable to check existing call_requests, response status code: %d", checkStatusCode), http.StatusInternalServerError)
+			http.Error(w, checkStatus, checkStatusCode)
 			return
 		}
 	}
@@ -493,6 +502,23 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		Requests: req.Requests,
 	}
 
+	var jobEntry *spire.Entry
+	// Prepare job entry for report
+	if !req.NoMetatx {
+		resp.MetatxRegistered = true
+
+		var createJobErr error
+		jobEntry, createJobErr = CreateJobInJournal(&server.BugoutAPIClient.BugoutSpireClient, signer)
+		if createJobErr != nil {
+			log.Printf("Unable to create job entry in journal, error: %v", createJobErr)
+		}
+	}
+
+	if jobEntry != nil {
+		resp.JobEntryId = jobEntry.Id
+		resp.JobEntryUrl = fmt.Sprintf("%s/journals/%s/entries/%s", server.BugoutAPIClient.SpireBaseURL, MOONSTREAM_METATX_JOBS_JOURNAL_ID, jobEntry.Id)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 
@@ -500,6 +526,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		pushedCallRequestIds := []string{}
 		failedCallRequestIds := []string{}
 
+		// Push batch by batch to metatx call requests creation endpoint in background
 		go func() {
 			for i, batchSpecs := range callRequestBatches {
 				requestBody := CreateCallRequestsRequest{
@@ -519,28 +546,31 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 
 				statusCode, responseBodyStr := server.MoonstreamEngineAPIClient.sendCallRequests(authorizationToken, requestBodyBytes)
 				if statusCode == 200 {
-					log.Printf("Successfully pushed %d batch of %d total with %d call_requests to API", i+1, len(pushedCallRequestIds), len(batchSpecs))
 					for _, r := range batchSpecs {
 						pushedCallRequestIds = append(pushedCallRequestIds, r.RequestId)
 					}
+					log.Printf("Batch %d of %d total with %d call_requests successfully pushed to API", i+1, len(callRequestBatches), callRequestsLen)
 					continue
 				}
 
 				if statusCode == 409 {
-					log.Printf("During sending call requests duplication error ocurred: %v", responseBodyStr)
+					log.Printf("Batch %d of %d total with %d call_requests failed with duplication error: %v", i+1, len(callRequestBatches), callRequestsLen, responseBodyStr)
 				} else {
-					log.Printf("During sending call requests an %d error ocurred: %v\n", statusCode, responseBodyStr)
+					log.Printf("Batch %d of %d total with %d call_requests failed with error: %v", i+1, len(callRequestBatches), callRequestsLen, responseBodyStr)
 				}
 				for _, r := range batchSpecs {
 					failedCallRequestIds = append(failedCallRequestIds, r.RequestId)
 				}
 			}
 
-			if len(failedCallRequestIds) != 0 {
-				jobStatusCode, writeJobErr := server.BugoutAPIClient.WriteJobToJournal(signer, pushedCallRequestIds, failedCallRequestIds)
+			// Send job report to entry
+			if jobEntry != nil {
+				jobStatusCode, writeJobErr := server.BugoutAPIClient.UpdateJobInJournal(jobEntry.Id, signer, pushedCallRequestIds, failedCallRequestIds)
 				if writeJobErr != nil {
 					log.Printf("Unable to push waggle job to journal, status code %d, error: %v", jobStatusCode, writeJobErr)
 				}
+			} else {
+				log.Printf("Job entry creation failed, job report not pushed")
 			}
 		}()
 	}

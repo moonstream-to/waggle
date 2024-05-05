@@ -22,6 +22,8 @@ type BugoutAPIClient struct {
 	BroodBaseURL string
 	SpireBaseURL string
 	HTTPClient   *http.Client
+
+	BugoutSpireClient spire.SpireClient
 }
 
 func InitBugoutAPIClient() (*BugoutAPIClient, error) {
@@ -41,10 +43,14 @@ func InitBugoutAPIClient() (*BugoutAPIClient, error) {
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	httpClient := http.Client{Timeout: timeout}
 
+	spire.ClientFromEnv()
+
 	return &BugoutAPIClient{
 		BroodBaseURL: BROOD_API_URL,
 		SpireBaseURL: SPIRE_API_URL,
 		HTTPClient:   &httpClient,
+
+		BugoutSpireClient: spire.SpireClient{SpireURL: SPIRE_API_URL, Routes: spire.RoutesFromURL(SPIRE_API_URL), HTTPClient: &httpClient},
 	}, nil
 }
 
@@ -211,7 +217,7 @@ func (c *BugoutAPIClient) CheckAccessToResource(token, resourceId string) (Resou
 	var requestBodyBytes []byte
 	request, requestErr := http.NewRequest("GET", fmt.Sprintf("%s/resources/%s/holders", c.BroodBaseURL, resourceId), bytes.NewBuffer(requestBodyBytes))
 	if requestErr != nil {
-		return resourceHolders, 500, requestErr
+		return resourceHolders, 0, requestErr
 	}
 
 	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
@@ -220,7 +226,7 @@ func (c *BugoutAPIClient) CheckAccessToResource(token, resourceId string) (Resou
 
 	response, responseErr := c.HTTPClient.Do(request)
 	if responseErr != nil {
-		return resourceHolders, 500, responseErr
+		return resourceHolders, 0, responseErr
 	}
 	defer response.Body.Close()
 
@@ -229,8 +235,8 @@ func (c *BugoutAPIClient) CheckAccessToResource(token, resourceId string) (Resou
 		return resourceHolders, response.StatusCode, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
 	}
 
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return resourceHolders, response.StatusCode, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, response.Status)
+	if response.StatusCode != 200 {
+		return resourceHolders, response.StatusCode, fmt.Errorf("unexpected status code: %d -- response status: %s", response.StatusCode, response.Status)
 	}
 
 	unmarshalErr := json.Unmarshal(responseBody, &resourceHolders)
@@ -252,7 +258,7 @@ func (c *BugoutAPIClient) FindUser(token, userId string) (User, int, error) {
 	var requestBodyBytes []byte
 	request, requestErr := http.NewRequest("GET", fmt.Sprintf("%s/user/find?user_id=%s", c.BroodBaseURL, userId), bytes.NewBuffer(requestBodyBytes))
 	if requestErr != nil {
-		return user, 500, requestErr
+		return user, 0, requestErr
 	}
 	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 	request.Header.Add("Accept", "application/json")
@@ -260,7 +266,7 @@ func (c *BugoutAPIClient) FindUser(token, userId string) (User, int, error) {
 
 	response, responseErr := c.HTTPClient.Do(request)
 	if responseErr != nil {
-		return user, 500, requestErr
+		return user, 0, requestErr
 	}
 	defer response.Body.Close()
 
@@ -269,8 +275,8 @@ func (c *BugoutAPIClient) FindUser(token, userId string) (User, int, error) {
 		return user, response.StatusCode, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
 	}
 
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return user, response.StatusCode, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, response.Status)
+	if response.StatusCode != 200 {
+		return user, response.StatusCode, fmt.Errorf("unexpected status code: %d -- response status: %s", response.StatusCode, response.Status)
 	}
 
 	unmarshalErr := json.Unmarshal(responseBody, &user)
@@ -292,7 +298,7 @@ func (c *BugoutAPIClient) FindGroup(token, groupId string) (Group, int, error) {
 	var requestBodyBytes []byte
 	request, requestErr := http.NewRequest("GET", fmt.Sprintf("%s/group/find?group_id=%s", c.BroodBaseURL, groupId), bytes.NewBuffer(requestBodyBytes))
 	if requestErr != nil {
-		return group, 500, requestErr
+		return group, 0, requestErr
 	}
 	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
 	request.Header.Add("Accept", "application/json")
@@ -300,7 +306,7 @@ func (c *BugoutAPIClient) FindGroup(token, groupId string) (Group, int, error) {
 
 	response, responseErr := c.HTTPClient.Do(request)
 	if responseErr != nil {
-		return group, 500, requestErr
+		return group, 0, requestErr
 	}
 	defer response.Body.Close()
 
@@ -309,8 +315,8 @@ func (c *BugoutAPIClient) FindGroup(token, groupId string) (Group, int, error) {
 		return group, response.StatusCode, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
 	}
 
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return group, response.StatusCode, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, response.Status)
+	if response.StatusCode != 200 {
+		return group, response.StatusCode, fmt.Errorf("unexpected status code: %d -- response status: %s", response.StatusCode, response.Status)
 	}
 
 	unmarshalErr := json.Unmarshal(responseBody, &group)
@@ -334,7 +340,7 @@ func (c *BugoutAPIClient) ModifyAccessToResource(token, resourceId, method strin
 
 	request, requestErr := http.NewRequest(method, fmt.Sprintf("%s/resources/%s/holders", c.BroodBaseURL, resourceId), reqBodyBytes)
 	if requestErr != nil {
-		return resourceHolders, 500, requestErr
+		return resourceHolders, 0, requestErr
 	}
 
 	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
@@ -343,7 +349,7 @@ func (c *BugoutAPIClient) ModifyAccessToResource(token, resourceId, method strin
 
 	response, responseErr := c.HTTPClient.Do(request)
 	if responseErr != nil {
-		return resourceHolders, 500, responseErr
+		return resourceHolders, 0, responseErr
 	}
 	defer response.Body.Close()
 
@@ -352,8 +358,8 @@ func (c *BugoutAPIClient) ModifyAccessToResource(token, resourceId, method strin
 		return resourceHolders, response.StatusCode, fmt.Errorf("could not read response body: %s", responseBodyErr.Error())
 	}
 
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return resourceHolders, response.StatusCode, fmt.Errorf("unexpected status code: %d -- could not read response body: %s", response.StatusCode, response.Status)
+	if response.StatusCode != 200 {
+		return resourceHolders, response.StatusCode, fmt.Errorf("unexpected status code: %d -- response status: %s", response.StatusCode, response.Status)
 	}
 
 	unmarshalErr := json.Unmarshal(responseBody, &resourceHolders)
@@ -362,6 +368,22 @@ func (c *BugoutAPIClient) ModifyAccessToResource(token, resourceId, method strin
 	}
 
 	return resourceHolders, response.StatusCode, nil
+}
+
+func CreateJobInJournal(client *spire.SpireClient, signer string) (*spire.Entry, error) {
+	title := fmt.Sprintf("draft job - signer %s", signer)
+	entryContext := spire.EntryContext{
+		ContextType: "waggle",
+	}
+	tags := []string{
+		"type:job",
+		fmt.Sprintf("signer:%s", signer),
+		"complete:false",
+	}
+	content := string([]byte("{}"))
+	jobEntry, err := client.CreateEntry(MOONSTREAM_WAGGLE_ADMIN_ACCESS_TOKEN, MOONSTREAM_METATX_JOBS_JOURNAL_ID, title, content, tags, entryContext)
+
+	return &jobEntry, err
 }
 
 type JobEntryContent struct {
@@ -375,10 +397,11 @@ type RequestJobEntry struct {
 	Tags    []string `json:"tags"`
 }
 
-func (c *BugoutAPIClient) WriteJobToJournal(signer string, pushedCallRequestIds, failedCallRequests []string) (int, error) {
+func (c *BugoutAPIClient) UpdateJobInJournal(entryId, signer string, pushedCallRequestIds, failedCallRequests []string) (int, error) {
 	tags := []string{
 		"type:job",
 		fmt.Sprintf("signer:%s", signer),
+		"complete:true",
 	}
 	if len(failedCallRequests) != 0 {
 		tags = append(tags, "failed:true")
@@ -401,7 +424,7 @@ func (c *BugoutAPIClient) WriteJobToJournal(signer string, pushedCallRequestIds,
 	reqBodyBytes := new(bytes.Buffer)
 	json.NewEncoder(reqBodyBytes).Encode(requestBody)
 
-	request, requestErr := http.NewRequest("POST", fmt.Sprintf("%s/journals/%s/entries", c.SpireBaseURL, MOONSTREAM_METATX_JOBS_JOURNAL_ID), reqBodyBytes)
+	request, requestErr := http.NewRequest("PUT", fmt.Sprintf("%s/journals/%s/entries/%s?tags_action=replace", c.SpireBaseURL, MOONSTREAM_METATX_JOBS_JOURNAL_ID, entryId), reqBodyBytes)
 	if requestErr != nil {
 		return 0, requestErr
 	}

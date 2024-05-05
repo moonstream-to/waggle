@@ -365,9 +365,8 @@ func (c *BugoutAPIClient) ModifyAccessToResource(token, resourceId, method strin
 }
 
 type JobEntryContent struct {
-	IgnoredCallRequests  [][]string `json:"ignored_call_requests"`
-	FailedCallRequests   [][]string `json:"failed_call_requests"`
-	PushedCallRequestIds []string   `json:"pushed_call_request_ids"`
+	FailedCallRequests   []string `json:"failed_call_requests"`
+	PushedCallRequestIds []string `json:"pushed_call_request_ids"`
 }
 
 type RequestJobEntry struct {
@@ -376,20 +375,16 @@ type RequestJobEntry struct {
 	Tags    []string `json:"tags"`
 }
 
-func (c *BugoutAPIClient) WriteJobToJournal(signer string, pushedCallRequestIds []string, ignoredCallRequests, failedCallRequests [][]string) (int, error) {
+func (c *BugoutAPIClient) WriteJobToJournal(signer string, pushedCallRequestIds, failedCallRequests []string) (int, error) {
 	tags := []string{
 		"type:job",
 		fmt.Sprintf("signer:%s", signer),
-	}
-	if len(ignoredCallRequests) != 0 {
-		tags = append(tags, "ignored:true")
 	}
 	if len(failedCallRequests) != 0 {
 		tags = append(tags, "failed:true")
 	}
 
 	jobEntryContent := &JobEntryContent{
-		IgnoredCallRequests:  ignoredCallRequests,
 		FailedCallRequests:   failedCallRequests,
 		PushedCallRequestIds: pushedCallRequestIds,
 	}

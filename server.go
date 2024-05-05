@@ -56,7 +56,8 @@ type SignDropperRequest struct {
 	Sensible bool                   `json:"sensible"`
 	Requests []*DropperClaimMessage `json:"requests"`
 
-	Metatx string `json:"metatx"`
+	NoMetatx      bool `json:"no_metatx"`
+	NoCheckMetatx bool `json:"no_check_metatx"`
 }
 
 type SignDropperResponse struct {
@@ -413,18 +414,15 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
-	metatx := ""
-	switch req.Metatx {
-	case "ignore":
-		metatx = "ignore"
-	case "sign_only":
-		metatx = "sign_only"
-	default:
-		metatx = ""
-	}
+	batchSize := 100
+	callRequestsLen := len(req.Requests)
+
+	var currentBatch []CallRequestSpecification
+	var callRequestBatches [][]CallRequestSpecification
 
 	var callRequestSpecifications []CallRequestSpecification
-	for _, message := range req.Requests {
+
+	for i, message := range req.Requests {
 		messageHash, hashErr := DropperClaimMessageHash(int64(req.ChainId), req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
 		if hashErr != nil {
 			http.Error(w, "Unable to generate message hash", http.StatusInternalServerError)
@@ -440,7 +438,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		message.Signature = hex.EncodeToString(signedMessage)
 		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
 
-		if metatx != "sign_only" {
+		if !req.NoMetatx {
 			callRequestSpecifications = append(callRequestSpecifications, CallRequestSpecification{
 				Caller:    message.Claimant,
 				Method:    "claim",
@@ -453,34 +451,36 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 					Signature:     message.Signature,
 				},
 			})
+
+			if (i+1)%batchSize == 0 || i == callRequestsLen-1 {
+				if currentBatch != nil {
+					callRequestBatches = append(callRequestBatches, currentBatch)
+				}
+				currentBatch = nil // Reset the batch
+			}
 		}
 	}
 
-	var wg sync.WaitGroup
 	var checkStatusCode int
 	var existingRequests CallRequestsCheck
-	if metatx != "sign_only" {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup) {
-			defer wg.Done()
+	if !req.NoMetatx && !req.NoCheckMetatx {
+		checkStatusCode, existingRequests = server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, "", req.Dropper, callRequestSpecifications)
 
-			checkStatusCode, existingRequests = server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, "", req.Dropper, callRequestSpecifications)
-		}(&wg)
-	}
-
-	if metatx == "" {
-		wg.Wait()
-
-		if len(existingRequests.ExistingRequests) != 0 {
-			var existingReqIds string
-			for i, r := range existingRequests.ExistingRequests {
-				if i == 0 {
-					existingReqIds += r[1]
-					continue
+		if checkStatusCode == 200 {
+			if len(existingRequests.ExistingRequests) != 0 {
+				var existingReqIds string
+				for i, r := range existingRequests.ExistingRequests {
+					if i == 0 {
+						existingReqIds += r[1]
+						continue
+					}
+					existingReqIds += fmt.Sprintf(",%s", r[1])
 				}
-				existingReqIds += fmt.Sprintf(",%s", r[1])
+				http.Error(w, fmt.Sprintf("Conflicting records were found in the database: [%s]", existingReqIds), http.StatusConflict)
+				return
 			}
-			http.Error(w, fmt.Sprintf("Conflicting records were found in the database: [%s]", existingReqIds), http.StatusConflict)
+		} else {
+			http.Error(w, fmt.Sprintf("Unable to check existing call_requests, response status code: %d", checkStatusCode), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -496,40 +496,11 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 
-	wg.Wait()
+	if !req.NoMetatx {
+		pushedCallRequestIds := []string{}
+		failedCallRequestIds := []string{}
 
-	if metatx != "sign_only" && checkStatusCode == 200 {
 		go func() {
-			batchSize := 100
-
-			ignoredCallRequestsTuple := [][]string{} // (call_request_id, caller) which already presented in database
-			failedCallRequestsTuple := [][]string{}  // (call_request_id, caller) which failed during write operation
-			pushedCallRequestIds := []string{}       // successfully pushed call_request_id's to database
-
-			var currentBatch []CallRequestSpecification
-			var callRequestBatches [][]CallRequestSpecification
-			callRequestsLen := len(callRequestSpecifications)
-			for i, r := range callRequestSpecifications {
-				isAdd := true
-				if len(existingRequests.ExistingRequests) != 0 {
-					for _, e := range existingRequests.ExistingRequests {
-						if r.RequestId == e[1] {
-							ignoredCallRequestsTuple = append(ignoredCallRequestsTuple, e)
-							isAdd = false
-						}
-					}
-				}
-				if isAdd {
-					currentBatch = append(currentBatch, r)
-				}
-				if (i+1)%batchSize == 0 || i == callRequestsLen-1 {
-					if currentBatch != nil {
-						callRequestBatches = append(callRequestBatches, currentBatch)
-					}
-					currentBatch = nil // Reset the batch
-				}
-			}
-
 			for i, batchSpecs := range callRequestBatches {
 				requestBody := CreateCallRequestsRequest{
 					TTLDays:         req.TtlDays,
@@ -540,33 +511,35 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 				requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)
 				if requestBodyBytesErr != nil {
 					log.Printf("Unable to marshal body, error: %v", requestBodyBytesErr)
-					return
+					for _, r := range batchSpecs {
+						failedCallRequestIds = append(failedCallRequestIds, r.RequestId)
+					}
+					continue
 				}
 
 				statusCode, responseBodyStr := server.MoonstreamEngineAPIClient.sendCallRequests(authorizationToken, requestBodyBytes)
 				if statusCode == 200 {
+					log.Printf("Successfully pushed %d batch of %d total with %d call_requests to API", i+1, len(pushedCallRequestIds), len(batchSpecs))
 					for _, r := range batchSpecs {
 						pushedCallRequestIds = append(pushedCallRequestIds, r.RequestId)
 					}
-					log.Printf("Successfully pushed %d batch of %d total with %d call_requests to API", i+1, len(pushedCallRequestIds), len(batchSpecs))
 					continue
 				}
 
 				if statusCode == 409 {
 					log.Printf("During sending call requests duplication error ocurred: %v", responseBodyStr)
 				} else {
-					log.Printf("During sending call requests an error ocurred: %v\n", responseBodyStr)
+					log.Printf("During sending call requests an %d error ocurred: %v\n", statusCode, responseBodyStr)
 				}
 				for _, r := range batchSpecs {
-					callerAndRId := []string{r.Caller, r.RequestId}
-					failedCallRequestsTuple = append(failedCallRequestsTuple, callerAndRId)
+					failedCallRequestIds = append(failedCallRequestIds, r.RequestId)
 				}
 			}
 
-			if len(ignoredCallRequestsTuple) != 0 || len(failedCallRequestsTuple) != 0 {
-				_, writeJobErr := server.BugoutAPIClient.WriteJobToJournal(signer, pushedCallRequestIds, ignoredCallRequestsTuple, failedCallRequestsTuple)
+			if len(failedCallRequestIds) != 0 {
+				jobStatusCode, writeJobErr := server.BugoutAPIClient.WriteJobToJournal(signer, pushedCallRequestIds, failedCallRequestIds)
 				if writeJobErr != nil {
-					log.Printf("Unable to push waggle job to journal, error: %v", writeJobErr)
+					log.Printf("Unable to push waggle job to journal, status code %d, error: %v", jobStatusCode, writeJobErr)
 				}
 			}
 		}()

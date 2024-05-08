@@ -407,7 +407,7 @@ func SearchJobsInJournal(client *spire.SpireClient, signer string, limit, offset
 	parameters := map[string]string{
 		"content": "true",
 	}
-	entryResultsPage, searchErr := client.SearchEntries(MOONSTREAM_WAGGLE_ADMIN_ACCESS_TOKEN, MOONSTREAM_METATX_JOBS_JOURNAL_ID, searchQuery, limit, offset, parameters)
+	entryResultsPage, searchErr := client.SearchEntries(BUGOUT_WAGGLE_ADMIN_ACCESS_TOKEN, BUGOUT_METATX_JOBS_JOURNAL_ID, searchQuery, limit, offset, parameters)
 	if searchErr != nil {
 		return nil, searchErr
 	}
@@ -455,7 +455,7 @@ func CreateJobInJournal(client *spire.SpireClient, signer string) (*spire.Entry,
 		"complete:false",
 	}
 	content := string([]byte("{}"))
-	jobEntry, err := client.CreateEntry(MOONSTREAM_WAGGLE_ADMIN_ACCESS_TOKEN, MOONSTREAM_METATX_JOBS_JOURNAL_ID, title, content, tags, entryContext)
+	jobEntry, err := client.CreateEntry(BUGOUT_WAGGLE_ADMIN_ACCESS_TOKEN, BUGOUT_METATX_JOBS_JOURNAL_ID, title, content, tags, entryContext)
 
 	return &jobEntry, err
 }
@@ -487,12 +487,12 @@ func (c *BugoutAPIClient) UpdateJobInJournal(entryId, signer string, pushedCallR
 	reqBodyBytes := new(bytes.Buffer)
 	json.NewEncoder(reqBodyBytes).Encode(requestBody)
 
-	request, requestErr := http.NewRequest("PUT", fmt.Sprintf("%s/journals/%s/entries/%s?tags_action=replace", c.SpireBaseURL, MOONSTREAM_METATX_JOBS_JOURNAL_ID, entryId), reqBodyBytes)
+	request, requestErr := http.NewRequest("PUT", fmt.Sprintf("%s/journals/%s/entries/%s?tags_action=replace", c.SpireBaseURL, BUGOUT_METATX_JOBS_JOURNAL_ID, entryId), reqBodyBytes)
 	if requestErr != nil {
 		return 0, requestErr
 	}
 
-	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", MOONSTREAM_WAGGLE_ADMIN_ACCESS_TOKEN))
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", BUGOUT_WAGGLE_ADMIN_ACCESS_TOKEN))
 	request.Header.Add("Accept", "application/json")
 	request.Header.Add("Content-Type", "application/json")
 

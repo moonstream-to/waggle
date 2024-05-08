@@ -559,7 +559,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 
 	if jobEntry != nil {
 		resp.JobEntryId = jobEntry.Id
-		resp.JobEntryUrl = fmt.Sprintf("%s/journals/%s/entries/%s", server.BugoutAPIClient.SpireBaseURL, MOONSTREAM_METATX_JOBS_JOURNAL_ID, jobEntry.Id)
+		resp.JobEntryUrl = fmt.Sprintf("%s/journals/%s/entries/%s", server.BugoutAPIClient.SpireBaseURL, BUGOUT_METATX_JOBS_JOURNAL_ID, jobEntry.Id)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

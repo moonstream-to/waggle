@@ -10,10 +10,12 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	spire "github.com/bugout-dev/bugout-go/pkg/spire"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
@@ -56,7 +58,8 @@ type SignDropperRequest struct {
 	Sensible bool                   `json:"sensible"`
 	Requests []*DropperClaimMessage `json:"requests"`
 
-	NoMetatx bool `json:"no_metatx"`
+	NoMetatx      bool `json:"no_metatx"`
+	NoCheckMetatx bool `json:"no_check_metatx"`
 }
 
 type SignDropperResponse struct {
@@ -66,7 +69,9 @@ type SignDropperResponse struct {
 	Sensible bool                   `json:"sensible"`
 	Requests []*DropperClaimMessage `json:"requests"`
 
-	MetatxRegistered bool `json:"metatx_registered"`
+	MetatxRegistered bool   `json:"metatx_registered"`
+	JobEntryId       string `json:"job_entry_id,omitempty"`
+	JobEntryUrl      string `json:"job_entry_url,omitempty"`
 }
 
 type AccessLevel struct {
@@ -108,7 +113,6 @@ func (server *Server) accessMiddleware(next http.Handler) http.Handler {
 
 		accessResourceHolders, statusCode, checkAccessErr := server.BugoutAPIClient.CheckAccessToResource(authorizationToken, server.AccessResourceId)
 		if checkAccessErr != nil {
-			log.Println(statusCode, checkAccessErr)
 			switch statusCode {
 			case 404:
 				http.Error(w, "Not Found", http.StatusNotFound)
@@ -260,7 +264,7 @@ func (server *Server) holdersRoute(w http.ResponseWriter, r *http.Request) {
 
 	sem := make(chan struct{}, 3)
 	var wg sync.WaitGroup
-	
+
 	// Extend holders with names and additional data
 	for i, h := range accessResourceHolders.Holders {
 		wg.Add(1)
@@ -354,18 +358,29 @@ func (server *Server) modifyHolderAccessRoute(w http.ResponseWriter, r *http.Req
 }
 
 func (server *Server) signersHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
+	if r.Method == http.MethodGet && r.URL.Path == "/signers/" {
 		server.signersRoute(w, r)
 		return
-	case http.MethodPost:
-		routePathSlice := strings.Split(r.URL.Path, "/")
-		requestedSigner := common.HexToAddress(routePathSlice[2]).String()
-		_, ok := server.AvailableSigners[requestedSigner]
-		if !ok {
-			http.Error(w, fmt.Sprintf("Unacceptable signer provided %s", requestedSigner), http.StatusBadRequest)
+	}
+
+	routePathSlice := strings.Split(r.URL.Path, "/")
+	requestedSigner := common.HexToAddress(routePathSlice[2]).String()
+	_, ok := server.AvailableSigners[requestedSigner]
+	if !ok {
+		http.Error(w, fmt.Sprintf("Unacceptable signer provided %s", requestedSigner), http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		switch {
+		case strings.Contains(r.URL.Path, "/jobs"):
+			server.jobsRoute(w, r, requestedSigner)
+			return
+		default:
+			http.Error(w, "Not found", http.StatusNotFound)
 			return
 		}
+	case http.MethodPost:
 		switch {
 		case strings.Contains(r.URL.Path, "/dropper/sign"):
 			// TODO: (kompotkot): Re-write in subroutes and subapps when times come
@@ -394,7 +409,39 @@ func (server *Server) signersRoute(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (server *Server) jobsRoute(w http.ResponseWriter, r *http.Request, signer string) {
+	limit := 10
+	offset := 0
+	queryIntParams := []string{"limit", "offset"}
+	for _, qp := range queryIntParams {
+		qpRaw := r.URL.Query().Get(qp)
+		if qpRaw != "" {
+			qpVal, err := strconv.Atoi(qpRaw)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Unable to parse %s as integer", qp), http.StatusBadRequest)
+				return
+			}
+			switch qp {
+			case "limit":
+				limit = qpVal
+			case "offset":
+				offset = qpVal
+			}
+		}
+	}
+
+	jobs, searchErr := SearchJobsInJournal(&server.BugoutAPIClient.BugoutSpireClient, signer, limit, offset)
+	if searchErr != nil {
+		http.Error(w, searchErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(jobs)
+}
+
 // signDropperRoute sign dropper call requests
+// If the query metatx is set to strict, then an error will be raised at the checkCallRequests step. If the metatx is soft (which is the default), then requests minus existing requests from checkCallRequests will be pushed.
 func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, signer string) {
 	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
 	authorizationToken := authorizationContext.AuthorizationToken
@@ -415,7 +462,14 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
-	callRequests := make([]CallRequestSpecification, len(req.Requests))
+	batchSize := 100
+	callRequestsLen := len(req.Requests)
+
+	var currentBatch []CallRequestSpecification
+	var callRequestBatches [][]CallRequestSpecification
+
+	var callRequestSpecifications []CallRequestSpecification
+
 	for i, message := range req.Requests {
 		messageHash, hashErr := DropperClaimMessageHash(int64(req.ChainId), req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
 		if hashErr != nil {
@@ -433,7 +487,8 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
 
 		if !req.NoMetatx {
-			callRequests[i] = CallRequestSpecification{
+			// If no_metatx key not provided with request, prepare slices for push to metatx call requests creation endpoint
+			newCallRequest := CallRequestSpecification{
 				Caller:    message.Claimant,
 				Method:    "claim",
 				RequestId: message.RequestID,
@@ -445,6 +500,40 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 					Signature:     message.Signature,
 				},
 			}
+			callRequestSpecifications = append(callRequestSpecifications, newCallRequest)
+			currentBatch = append(currentBatch, newCallRequest)
+			if (i+1)%batchSize == 0 || i == callRequestsLen-1 {
+				if currentBatch != nil {
+					callRequestBatches = append(callRequestBatches, currentBatch)
+				}
+				currentBatch = nil // Reset the batch
+			}
+		}
+	}
+
+	// Run check of existing call_requests in database
+	if !req.NoMetatx && !req.NoCheckMetatx {
+		checkStatusCode, existingRequests, checkStatus := server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, "", req.Dropper, callRequestSpecifications)
+
+		if checkStatusCode == 0 {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		} else if checkStatusCode == 200 {
+			if len(existingRequests.ExistingRequests) != 0 {
+				var existingReqIds string
+				for i, r := range existingRequests.ExistingRequests {
+					if i == 0 {
+						existingReqIds += r[1]
+						continue
+					}
+					existingReqIds += fmt.Sprintf(",%s", r[1])
+				}
+				http.Error(w, fmt.Sprintf("Conflicting records were found in the database: [%s]", existingReqIds), http.StatusConflict)
+				return
+			}
+		} else {
+			http.Error(w, checkStatus, checkStatusCode)
+			return
 		}
 	}
 
@@ -456,16 +545,78 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		Requests: req.Requests,
 	}
 
+	var jobEntry *spire.Entry
+	// Prepare job entry for report
 	if !req.NoMetatx {
-		createReqErr := server.MoonstreamEngineAPIClient.CreateCallRequests(authorizationToken, "", req.Dropper, req.TtlDays, callRequests, 100, 1)
-		if createReqErr == nil {
-			log.Printf("New %d call_requests registered at metatx for %s", len(callRequests), req.Dropper)
-			resp.MetatxRegistered = true
+		resp.MetatxRegistered = true
+
+		var createJobErr error
+		jobEntry, createJobErr = CreateJobInJournal(&server.BugoutAPIClient.BugoutSpireClient, signer)
+		if createJobErr != nil {
+			log.Printf("Unable to create job entry in journal, error: %v", createJobErr)
 		}
+	}
+
+	if jobEntry != nil {
+		resp.JobEntryId = jobEntry.Id
+		resp.JobEntryUrl = fmt.Sprintf("%s/journals/%s/entries/%s", server.BugoutAPIClient.SpireBaseURL, BUGOUT_METATX_JOBS_JOURNAL_ID, jobEntry.Id)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+
+	if !req.NoMetatx {
+		pushedCallRequestIds := []string{}
+		failedCallRequestIds := []string{}
+
+		// Push batch by batch to metatx call requests creation endpoint in background
+		go func() {
+			for i, batchSpecs := range callRequestBatches {
+				requestBody := CreateCallRequestsRequest{
+					TTLDays:         req.TtlDays,
+					Specifications:  batchSpecs,
+					ContractAddress: req.Dropper,
+				}
+
+				requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)
+				if requestBodyBytesErr != nil {
+					log.Printf("Unable to marshal body, error: %v", requestBodyBytesErr)
+					for _, r := range batchSpecs {
+						failedCallRequestIds = append(failedCallRequestIds, r.RequestId)
+					}
+					continue
+				}
+
+				statusCode, responseBodyStr := server.MoonstreamEngineAPIClient.sendCallRequests(authorizationToken, requestBodyBytes)
+				if statusCode == 200 {
+					for _, r := range batchSpecs {
+						pushedCallRequestIds = append(pushedCallRequestIds, r.RequestId)
+					}
+					log.Printf("Batch %d of %d total with %d call_requests successfully pushed to API", i+1, len(callRequestBatches), callRequestsLen)
+					continue
+				}
+
+				if statusCode == 409 {
+					log.Printf("Batch %d of %d total with %d call_requests failed with duplication error: %v", i+1, len(callRequestBatches), callRequestsLen, responseBodyStr)
+				} else {
+					log.Printf("Batch %d of %d total with %d call_requests failed with error: %v", i+1, len(callRequestBatches), callRequestsLen, responseBodyStr)
+				}
+				for _, r := range batchSpecs {
+					failedCallRequestIds = append(failedCallRequestIds, r.RequestId)
+				}
+			}
+
+			// Send job report to entry
+			if jobEntry != nil {
+				jobStatusCode, writeJobErr := server.BugoutAPIClient.UpdateJobInJournal(jobEntry.Id, signer, pushedCallRequestIds, failedCallRequestIds)
+				if writeJobErr != nil {
+					log.Printf("Unable to push waggle job to journal, status code %d, error: %v", jobStatusCode, writeJobErr)
+				}
+			} else {
+				log.Printf("Job entry creation failed, job report not pushed")
+			}
+		}()
+	}
 }
 
 // Serve handles server run

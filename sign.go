@@ -130,7 +130,7 @@ func DropperClaimMessageHash(chainId int64, dropperAddress string, dropId, reque
 		Domain: apitypes.TypedDataDomain{
 			Name:              "Moonstream Dropper",
 			Version:           "0.2.0",
-			ChainId:           (*math.HexOrDecimal256)(big.NewInt(int64(chainId))),
+			ChainId:           (*math.HexOrDecimal256)(big.NewInt(chainId)),
 			VerifyingContract: dropperAddress,
 		},
 		Message: apitypes.TypedDataMessage{

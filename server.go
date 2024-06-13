@@ -52,7 +52,7 @@ type SignersResponse struct {
 }
 
 type SignDropperRequest struct {
-	ChainId  int                    `json:"chain_id"`
+	ChainId  int64                  `json:"chain_id"`
 	Dropper  string                 `json:"dropper"`
 	TtlDays  int                    `json:"ttl_days"`
 	Sensible bool                   `json:"sensible"`
@@ -63,7 +63,7 @@ type SignDropperRequest struct {
 }
 
 type SignDropperResponse struct {
-	ChainId  int                    `json:"chain_id"`
+	ChainId  int64                  `json:"chain_id"`
 	Dropper  string                 `json:"dropper"`
 	TtlDays  int                    `json:"ttl_days"`
 	Sensible bool                   `json:"sensible"`
@@ -471,7 +471,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 	var callRequestSpecifications []CallRequestSpecification
 
 	for i, message := range req.Requests {
-		messageHash, hashErr := DropperClaimMessageHash(int64(req.ChainId), req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
+		messageHash, hashErr := DropperClaimMessageHash(req.ChainId, req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
 		if hashErr != nil {
 			http.Error(w, "Unable to generate message hash", http.StatusInternalServerError)
 			return

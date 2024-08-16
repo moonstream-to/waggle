@@ -52,11 +52,12 @@ type SignersResponse struct {
 }
 
 type SignDropperRequest struct {
-	ChainId  int64                  `json:"chain_id"`
-	Dropper  string                 `json:"dropper"`
-	TtlDays  int                    `json:"ttl_days"`
-	Sensible bool                   `json:"sensible"`
-	Requests []*DropperClaimMessage `json:"requests"`
+	ChainId              int64                  `json:"chain_id"`
+	Dropper              string                 `json:"dropper"`
+	RegisteredContractId string                 `json:"registered_contract_id"`
+	TtlDays              int                    `json:"ttl_days"`
+	Sensible             bool                   `json:"sensible"`
+	Requests             []*DropperClaimMessage `json:"requests"`
 
 	NoMetatx      bool `json:"no_metatx"`
 	NoCheckMetatx bool `json:"no_check_metatx"`
@@ -460,6 +461,26 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 	if parseErr != nil {
 		http.Error(w, "Unable to parse body", http.StatusBadRequest)
 		return
+	}
+
+	if req.Dropper == "" && req.RegisteredContractId == "" {
+		http.Error(w, "Dropper address or registered contract ID should be specified", http.StatusBadRequest)
+		return
+	}
+
+	if req.RegisteredContractId != "" {
+		contractStatusCode, registeredContract, contractStatus := server.MoonstreamEngineAPIClient.GetRegisteredContract(authorizationToken, req.RegisteredContractId)
+		if contractStatusCode == 500 {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		if contractStatusCode != 200 {
+			http.Error(w, contractStatus, contractStatusCode)
+			return
+		}
+
+		req.ChainId = registeredContract.ChainId
+		req.Dropper = registeredContract.Address
 	}
 
 	batchSize := 100

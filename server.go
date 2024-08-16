@@ -534,7 +534,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 
 	// Run check of existing call_requests in database
 	if !req.NoMetatx && !req.NoCheckMetatx {
-		checkStatusCode, existingRequests, checkStatus := server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, "", req.Dropper, callRequestSpecifications)
+		checkStatusCode, existingRequests, checkStatus := server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, req.RegisteredContractId, req.Dropper, callRequestSpecifications)
 
 		if checkStatusCode == 0 {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -594,9 +594,13 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		go func() {
 			for i, batchSpecs := range callRequestBatches {
 				requestBody := CreateCallRequestsRequest{
-					TTLDays:         req.TtlDays,
-					Specifications:  batchSpecs,
-					ContractAddress: req.Dropper,
+					TTLDays:        req.TtlDays,
+					Specifications: batchSpecs,
+				}
+				if req.RegisteredContractId != "" {
+					requestBody.ContractID = req.RegisteredContractId
+				} else {
+					requestBody.ContractAddress = req.Dropper
 				}
 
 				requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)

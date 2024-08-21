@@ -52,11 +52,12 @@ type SignersResponse struct {
 }
 
 type SignDropperRequest struct {
-	ChainId  int64                  `json:"chain_id"`
-	Dropper  string                 `json:"dropper"`
-	TtlDays  int                    `json:"ttl_days"`
-	Sensible bool                   `json:"sensible"`
-	Requests []*DropperClaimMessage `json:"requests"`
+	ChainId              int64                  `json:"chain_id"`
+	Dropper              string                 `json:"dropper"`
+	RegisteredContractId string                 `json:"registered_contract_id"`
+	TtlDays              int                    `json:"ttl_days"`
+	Sensible             bool                   `json:"sensible"`
+	Requests             []*DropperClaimMessage `json:"requests"`
 
 	NoMetatx      bool `json:"no_metatx"`
 	NoCheckMetatx bool `json:"no_check_metatx"`
@@ -462,6 +463,26 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
+	if req.Dropper == "" && req.RegisteredContractId == "" {
+		http.Error(w, "Dropper address or registered contract ID should be specified", http.StatusBadRequest)
+		return
+	}
+
+	if req.RegisteredContractId != "" {
+		contractStatusCode, registeredContract, contractStatus := server.MoonstreamEngineAPIClient.GetRegisteredContract(authorizationToken, req.RegisteredContractId)
+		if contractStatusCode == 500 {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		if contractStatusCode != 200 {
+			http.Error(w, contractStatus, contractStatusCode)
+			return
+		}
+
+		req.ChainId = registeredContract.ChainId
+		req.Dropper = registeredContract.Address
+	}
+
 	batchSize := 100
 	callRequestsLen := len(req.Requests)
 
@@ -513,7 +534,7 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 
 	// Run check of existing call_requests in database
 	if !req.NoMetatx && !req.NoCheckMetatx {
-		checkStatusCode, existingRequests, checkStatus := server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, "", req.Dropper, callRequestSpecifications)
+		checkStatusCode, existingRequests, checkStatus := server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, req.RegisteredContractId, req.Dropper, callRequestSpecifications)
 
 		if checkStatusCode == 0 {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -573,9 +594,13 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 		go func() {
 			for i, batchSpecs := range callRequestBatches {
 				requestBody := CreateCallRequestsRequest{
-					TTLDays:         req.TtlDays,
-					Specifications:  batchSpecs,
-					ContractAddress: req.Dropper,
+					TTLDays:        req.TtlDays,
+					Specifications: batchSpecs,
+				}
+				if req.RegisteredContractId != "" {
+					requestBody.ContractID = req.RegisteredContractId
+				} else {
+					requestBody.ContractAddress = req.Dropper
 				}
 
 				requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)

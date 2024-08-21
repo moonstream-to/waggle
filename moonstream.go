@@ -14,6 +14,7 @@ import (
 type RegisteredContract struct {
 	Id                string    `json:"id"`
 	Blockchain        string    `json:"blockchain"`
+	ChainId           int64     `json:"chain_id"`
 	Address           string    `json:"address"`
 	MetatxRequesterId string    `json:"metatx_requester_id"`
 	Title             string    `json:"title"`
@@ -141,6 +142,44 @@ func (client *MoonstreamEngineAPIClient) ListRegisteredContracts(accessToken, bl
 	}
 
 	return contracts, nil
+}
+
+func (client *MoonstreamEngineAPIClient) GetRegisteredContract(accessToken, contractId string) (int, RegisteredContract, string) {
+	var contract RegisteredContract
+
+	request, requestCreationErr := http.NewRequest("GET", fmt.Sprintf("%s/metatx/contracts/%s", client.BaseURL, contractId), nil)
+	if requestCreationErr != nil {
+		log.Printf("Unable to create request, error: %v", requestCreationErr)
+		return 500, contract, ""
+	}
+
+	request.Header.Add("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+	request.Header.Add("Accept", "application/json")
+
+	response, responseErr := client.HTTPClient.Do(request)
+	if responseErr != nil {
+		log.Printf("Unable to do request, error: %v", responseErr)
+		return 500, contract, ""
+	}
+	defer response.Body.Close()
+
+	responseBody, responseBodyErr := io.ReadAll(response.Body)
+	if responseBodyErr != nil {
+		log.Printf("Unable to parse response body, error: %v", responseBodyErr)
+		return response.StatusCode, contract, response.Status
+	}
+
+	if response.StatusCode != 200 {
+		return response.StatusCode, contract, string(responseBody)
+	}
+
+	unmarshalErr := json.Unmarshal(responseBody, &contract)
+	if unmarshalErr != nil {
+		log.Printf("Could not parse response body, error: %s", unmarshalErr)
+		return response.StatusCode, contract, response.Status
+	}
+
+	return response.StatusCode, contract, response.Status
 }
 
 func (client *MoonstreamEngineAPIClient) ListCallRequests(accessToken, contractId, contractAddress, caller string, limit, offset int, showExpired bool) ([]CallRequest, error) {

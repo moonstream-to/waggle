@@ -24,6 +24,7 @@ func CreateRootCommand() *cobra.Command {
 
 	waggle currently supports signatures for the following types of contracts:
 	- Dropper (dropper-v0.2.0)
+	- Dropper (dropperV3 3.0)
 
 	waggle makes it easy to sign large numbers of requests in a very short amount of time. It also allows
 	you to automatically send transaction requests to the Moonstream API.
@@ -197,6 +198,26 @@ func CreateSignCommand() *cobra.Command {
 	dropperHashSubcommand.Flags().StringVar(&blockDeadline, "block-deadline", "0", "Block number by which the claim must be made.")
 	dropperHashSubcommand.Flags().StringVar(&amount, "amount", "0", "Amount of tokens to distribute.")
 
+	dropperV3HashSubcommand := &cobra.Command{
+		Use:   "v3-hash",
+		Short: "Generate a message hash for a claim method call",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			messageHash, err := DropperV3ClaimMessageHash(chainId, dropperAddress, dropId, requestId, claimant, blockDeadline, amount)
+			if err != nil {
+				return err
+			}
+			cmd.Println(hex.EncodeToString(messageHash))
+			return nil
+		},
+	}
+	dropperV3HashSubcommand.Flags().Int64Var(&chainId, "chain-id", 1, "Chain ID of the network you are signing for.")
+	dropperV3HashSubcommand.Flags().StringVar(&dropperAddress, "dropper", "0x0000000000000000000000000000000000000000", "Address of Dropper contract")
+	dropperV3HashSubcommand.Flags().StringVar(&dropId, "drop-id", "0", "ID of the drop.")
+	dropperV3HashSubcommand.Flags().StringVar(&requestId, "request-id", "0", "ID of the request.")
+	dropperV3HashSubcommand.Flags().StringVar(&claimant, "claimant", "", "Address of the intended claimant.")
+	dropperV3HashSubcommand.Flags().StringVar(&blockDeadline, "block-deadline", "0", "Time Stamp by which the claim must be made.")
+	dropperV3HashSubcommand.Flags().StringVar(&amount, "amount", "0", "Amount of tokens to distribute.")
+
 	dropperSingleSubcommand := &cobra.Command{
 		Use:   "single",
 		Short: "Sign a single claim method call",
@@ -246,6 +267,56 @@ func CreateSignCommand() *cobra.Command {
 	dropperSingleSubcommand.Flags().StringVar(&blockDeadline, "block-deadline", "0", "Block number by which the claim must be made.")
 	dropperSingleSubcommand.Flags().StringVar(&amount, "amount", "0", "Amount of tokens to distribute.")
 	dropperSingleSubcommand.Flags().BoolVar(&hashFlag, "hash", false, "Output the message hash instead of the signature.")
+
+	dropperV3SingleSubcommand := &cobra.Command{
+		Use:   "single-v3",
+		Short: "Sign a single claim method call",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			messageHash, hashErr := DropperV3ClaimMessageHash(chainId, dropperAddress, dropId, requestId, claimant, blockDeadline, amount)
+			if hashErr != nil {
+				return hashErr
+			}
+
+			if hashFlag {
+				cmd.Println(hex.EncodeToString(messageHash))
+				return nil
+			}
+
+			key, keyErr := KeyFromFile(keyfile, password)
+			if keyErr != nil {
+				return keyErr
+			}
+
+			signedMessage, err := SignRawMessage(messageHash, key, sensible)
+			if err != nil {
+				return err
+			}
+
+			result := DropperClaimMessage{
+				DropId:        dropId,
+				RequestID:     requestId,
+				Claimant:      claimant,
+				BlockDeadline: blockDeadline,
+				Amount:        amount,
+				Signature:     hex.EncodeToString(signedMessage),
+				Signer:        key.Address.Hex(),
+			}
+			resultJSON, encodeErr := json.Marshal(result)
+			if encodeErr != nil {
+				return encodeErr
+			}
+			os.Stdout.Write(resultJSON)
+			return nil
+		},
+	}
+	dropperV3SingleSubcommand.Flags().Int64Var(&chainId, "chain-id", 1, "Chain ID of the network you are signing for.")
+	dropperV3SingleSubcommand.Flags().StringVar(&dropperAddress, "dropper", "0x0000000000000000000000000000000000000000", "Address of Dropper contract")
+	dropperV3SingleSubcommand.Flags().StringVar(&dropId, "drop-id", "0", "ID of the drop.")
+	dropperV3SingleSubcommand.Flags().StringVar(&requestId, "request-id", "0", "ID of the request.")
+	dropperV3SingleSubcommand.Flags().StringVar(&claimant, "claimant", "", "Address of the intended claimant.")
+	dropperV3SingleSubcommand.Flags().StringVar(&blockDeadline, "block-deadline", "0", "Time stamp by which the claim must be made.")
+	dropperV3SingleSubcommand.Flags().StringVar(&amount, "amount", "0", "Amount of tokens to distribute.")
+	dropperV3SingleSubcommand.Flags().BoolVar(&hashFlag, "hash", false, "Output the message hash instead of the signature.")
 
 	dropperBatchSubcommand := &cobra.Command{
 		Use:   "batch",
@@ -351,6 +422,111 @@ func CreateSignCommand() *cobra.Command {
 	dropperBatchSubcommand.Flags().StringVar(&infile, "infile", "", "Input file. If not specified, input will be expected from stdin.")
 	dropperBatchSubcommand.Flags().StringVar(&outfile, "outfile", "", "Output file. If not specified, output will be written to stdout.")
 	dropperBatchSubcommand.Flags().BoolVar(&isCSV, "csv", false, "Set this flag if the --infile is a CSV file.")
+
+	dropperV3BatchSubcommand := &cobra.Command{
+		Use:   "batch-v3",
+		Short: "Sign a batch of claim method calls",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			key, keyErr := KeyFromFile(keyfile, password)
+			if keyErr != nil {
+				return keyErr
+			}
+
+			var batchRaw []byte
+			var readErr error
+
+			var batch []*DropperClaimMessage
+
+			if !isCSV {
+				if infile != "" {
+					batchRaw, readErr = os.ReadFile(infile)
+				} else {
+					batchRaw, readErr = io.ReadAll(os.Stdin)
+				}
+				if readErr != nil {
+					return readErr
+				}
+
+				parseErr := json.Unmarshal(batchRaw, &batch)
+				if parseErr != nil {
+					return parseErr
+				}
+			} else {
+				var csvReader *csv.Reader
+				if infile == "" {
+					csvReader = csv.NewReader(os.Stdin)
+				} else {
+					r, csvOpenErr := os.Open(infile)
+					if csvOpenErr != nil {
+						return csvOpenErr
+					}
+					defer r.Close()
+
+					csvReader = csv.NewReader(r)
+				}
+
+				csvData, csvReadErr := csvReader.ReadAll()
+				if csvReadErr != nil {
+					return csvReadErr
+				}
+
+				csvHeaders := csvData[0]
+				csvData = csvData[1:]
+				batch = make([]*DropperClaimMessage, len(csvData))
+
+				for i, row := range csvData {
+					jsonData := make(map[string]string)
+
+					for j, value := range row {
+						jsonData[csvHeaders[j]] = value
+					}
+
+					jsonString, rowMarshalErr := json.Marshal(jsonData)
+					if rowMarshalErr != nil {
+						return rowMarshalErr
+					}
+
+					rowParseErr := json.Unmarshal(jsonString, &batch[i])
+					if rowParseErr != nil {
+						return rowParseErr
+					}
+				}
+			}
+
+			for _, message := range batch {
+				messageHash, hashErr := DropperV3ClaimMessageHash(chainId, dropperAddress, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
+				if hashErr != nil {
+					return hashErr
+				}
+
+				signedMessage, signatureErr := SignRawMessage(messageHash, key, sensible)
+				if signatureErr != nil {
+					return signatureErr
+				}
+
+				message.Signature = hex.EncodeToString(signedMessage)
+				message.Signer = key.Address.Hex()
+			}
+
+			resultJSON, encodeErr := json.Marshal(batch)
+			if encodeErr != nil {
+				return encodeErr
+			}
+
+			if outfile != "" {
+				os.WriteFile(outfile, resultJSON, 0644)
+			} else {
+				os.Stdout.Write(resultJSON)
+			}
+
+			return nil
+		},
+	}
+	dropperV3BatchSubcommand.Flags().Int64Var(&chainId, "chain-id", 1, "Chain ID of the network you are signing for.")
+	dropperV3BatchSubcommand.Flags().StringVar(&dropperAddress, "dropper", "0x0000000000000000000000000000000000000000", "Address of Dropper contract")
+	dropperV3BatchSubcommand.Flags().StringVar(&infile, "infile", "", "Input file. If not specified, input will be expected from stdin.")
+	dropperV3BatchSubcommand.Flags().StringVar(&outfile, "outfile", "", "Output file. If not specified, output will be written to stdout.")
+	dropperV3BatchSubcommand.Flags().BoolVar(&isCSV, "csv", false, "Set this flag if the --infile is a CSV file.")
 
 	dropperPullSubcommand := &cobra.Command{
 		Use:   "pull",

@@ -387,6 +387,8 @@ func (server *Server) signersHandler(w http.ResponseWriter, r *http.Request) {
 			// TODO: (kompotkot): Re-write in subroutes and subapps when times come
 			server.signDropperRoute(w, r, requestedSigner)
 			return
+		case strings.Contains(r.URL.Path, "/dropperV3/sign"):
+			server.signDropperV3Route(w, r, requestedSigner)
 		default:
 			http.Error(w, "Not found", http.StatusNotFound)
 			return
@@ -493,6 +495,209 @@ func (server *Server) signDropperRoute(w http.ResponseWriter, r *http.Request, s
 
 	for i, message := range req.Requests {
 		messageHash, hashErr := DropperClaimMessageHash(req.ChainId, req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
+		if hashErr != nil {
+			http.Error(w, "Unable to generate message hash", http.StatusInternalServerError)
+			return
+		}
+
+		signedMessage, signatureErr := SignRawMessage(messageHash, server.AvailableSigners[signer].key, req.Sensible)
+		if signatureErr != nil {
+			http.Error(w, "Unable to sign message", http.StatusInternalServerError)
+			return
+		}
+
+		message.Signature = hex.EncodeToString(signedMessage)
+		message.Signer = server.AvailableSigners[signer].key.Address.Hex()
+
+		if !req.NoMetatx {
+			// If no_metatx key not provided with request, prepare slices for push to metatx call requests creation endpoint
+			newCallRequest := CallRequestSpecification{
+				Caller:    message.Claimant,
+				Method:    "claim",
+				RequestId: message.RequestID,
+				Parameters: DropperCallRequestParameters{
+					DropId:        message.DropId,
+					BlockDeadline: message.BlockDeadline,
+					Amount:        message.Amount,
+					Signer:        signer,
+					Signature:     message.Signature,
+				},
+			}
+			callRequestSpecifications = append(callRequestSpecifications, newCallRequest)
+			currentBatch = append(currentBatch, newCallRequest)
+			if (i+1)%batchSize == 0 || i == callRequestsLen-1 {
+				if currentBatch != nil {
+					callRequestBatches = append(callRequestBatches, currentBatch)
+				}
+				currentBatch = nil // Reset the batch
+			}
+		}
+	}
+
+	// Run check of existing call_requests in database
+	if !req.NoMetatx && !req.NoCheckMetatx {
+		checkStatusCode, existingRequests, checkStatus := server.MoonstreamEngineAPIClient.checkCallRequests(authorizationToken, req.RegisteredContractId, req.Dropper, callRequestSpecifications)
+
+		if checkStatusCode == 0 {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		} else if checkStatusCode == 200 {
+			if len(existingRequests.ExistingRequests) != 0 {
+				var existingReqIds string
+				for i, r := range existingRequests.ExistingRequests {
+					if i == 0 {
+						existingReqIds += r[1]
+						continue
+					}
+					existingReqIds += fmt.Sprintf(",%s", r[1])
+				}
+				http.Error(w, fmt.Sprintf("Conflicting records were found in the database: [%s]", existingReqIds), http.StatusConflict)
+				return
+			}
+		} else {
+			http.Error(w, checkStatus, checkStatusCode)
+			return
+		}
+	}
+
+	resp := SignDropperResponse{
+		ChainId:  req.ChainId,
+		Dropper:  req.Dropper,
+		TtlDays:  req.TtlDays,
+		Sensible: req.Sensible,
+		Requests: req.Requests,
+	}
+
+	var jobEntry *spire.Entry
+	// Prepare job entry for report
+	if !req.NoMetatx {
+		resp.MetatxRegistered = true
+
+		var createJobErr error
+		jobEntry, createJobErr = CreateJobInJournal(&server.BugoutAPIClient.BugoutSpireClient, signer)
+		if createJobErr != nil {
+			log.Printf("Unable to create job entry in journal, error: %v", createJobErr)
+		}
+	}
+
+	if jobEntry != nil {
+		resp.JobEntryId = jobEntry.Id
+		resp.JobEntryUrl = fmt.Sprintf("%s/journals/%s/entries/%s", server.BugoutAPIClient.SpireBaseURL, BUGOUT_METATX_JOBS_JOURNAL_ID, jobEntry.Id)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+
+	if !req.NoMetatx {
+		pushedCallRequestIds := []string{}
+		failedCallRequestIds := []string{}
+
+		// Push batch by batch to metatx call requests creation endpoint in background
+		go func() {
+			for i, batchSpecs := range callRequestBatches {
+				requestBody := CreateCallRequestsRequest{
+					TTLDays:        req.TtlDays,
+					Specifications: batchSpecs,
+				}
+				if req.RegisteredContractId != "" {
+					requestBody.ContractID = req.RegisteredContractId
+				} else {
+					requestBody.ContractAddress = req.Dropper
+				}
+
+				requestBodyBytes, requestBodyBytesErr := json.Marshal(requestBody)
+				if requestBodyBytesErr != nil {
+					log.Printf("Unable to marshal body, error: %v", requestBodyBytesErr)
+					for _, r := range batchSpecs {
+						failedCallRequestIds = append(failedCallRequestIds, r.RequestId)
+					}
+					continue
+				}
+
+				statusCode, responseBodyStr := server.MoonstreamEngineAPIClient.sendCallRequests(authorizationToken, requestBodyBytes)
+				if statusCode == 200 {
+					for _, r := range batchSpecs {
+						pushedCallRequestIds = append(pushedCallRequestIds, r.RequestId)
+					}
+					log.Printf("Batch %d of %d total with %d call_requests successfully pushed to API", i+1, len(callRequestBatches), callRequestsLen)
+					continue
+				}
+
+				if statusCode == 409 {
+					log.Printf("Batch %d of %d total with %d call_requests failed with duplication error: %v", i+1, len(callRequestBatches), callRequestsLen, responseBodyStr)
+				} else {
+					log.Printf("Batch %d of %d total with %d call_requests failed with error: %v", i+1, len(callRequestBatches), callRequestsLen, responseBodyStr)
+				}
+				for _, r := range batchSpecs {
+					failedCallRequestIds = append(failedCallRequestIds, r.RequestId)
+				}
+			}
+
+			// Send job report to entry
+			if jobEntry != nil {
+				jobStatusCode, writeJobErr := server.BugoutAPIClient.UpdateJobInJournal(jobEntry.Id, signer, pushedCallRequestIds, failedCallRequestIds)
+				if writeJobErr != nil {
+					log.Printf("Unable to push waggle job to journal, status code %d, error: %v", jobStatusCode, writeJobErr)
+				}
+			} else {
+				log.Printf("Job entry creation failed, job report not pushed")
+			}
+		}()
+	}
+}
+
+// signDropperV3Route sign dropperV3 call requests
+// If the query metatx is set to strict, then an error will be raised at the checkCallRequests step. If the metatx is soft (which is the default), then requests minus existing requests from checkCallRequests will be pushed.
+func (server *Server) signDropperV3Route(w http.ResponseWriter, r *http.Request, signer string) {
+	authorizationContext := r.Context().Value("authorizationContext").(AuthorizationContext)
+	authorizationToken := authorizationContext.AuthorizationToken
+
+	body, readErr := io.ReadAll(r.Body)
+	if readErr != nil {
+		http.Error(w, "Unable to read body", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	if len(body) > 0 {
+		defer r.Body.Close()
+	}
+	var req *SignDropperRequest
+	parseErr := json.Unmarshal(body, &req)
+	if parseErr != nil {
+		http.Error(w, "Unable to parse body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Dropper == "" && req.RegisteredContractId == "" {
+		http.Error(w, "Dropper address or registered contract ID should be specified", http.StatusBadRequest)
+		return
+	}
+
+	if req.RegisteredContractId != "" {
+		contractStatusCode, registeredContract, contractStatus := server.MoonstreamEngineAPIClient.GetRegisteredContract(authorizationToken, req.RegisteredContractId)
+		if contractStatusCode == 500 {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		if contractStatusCode != 200 {
+			http.Error(w, contractStatus, contractStatusCode)
+			return
+		}
+
+		req.ChainId = registeredContract.ChainId
+		req.Dropper = registeredContract.Address
+	}
+
+	batchSize := 100
+	callRequestsLen := len(req.Requests)
+
+	var currentBatch []CallRequestSpecification
+	var callRequestBatches [][]CallRequestSpecification
+
+	var callRequestSpecifications []CallRequestSpecification
+
+	for i, message := range req.Requests {
+		messageHash, hashErr := DropperV3ClaimMessageHash(req.ChainId, req.Dropper, message.DropId, message.RequestID, message.Claimant, message.BlockDeadline, message.Amount)
 		if hashErr != nil {
 			http.Error(w, "Unable to generate message hash", http.StatusInternalServerError)
 			return

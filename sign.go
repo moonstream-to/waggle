@@ -145,3 +145,41 @@ func DropperClaimMessageHash(chainId int64, dropperAddress string, dropId, reque
 	messageHash, _, err := apitypes.TypedDataAndHash(signerData)
 	return messageHash, err
 }
+
+func DropperV3ClaimMessageHash(chainId int64, dropperAddress string, dropId, requestId string, claimant string, blockDeadline, amount string) ([]byte, error) {
+	// Inspired by: https://medium.com/alpineintel/issuing-and-verifying-eip-712-challenges-with-go-32635ca78aaf
+	signerData := apitypes.TypedData{
+		Types: apitypes.Types{
+			"EIP712Domain": {
+				{Name: "name", Type: "string"},
+				{Name: "version", Type: "string"},
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"ClaimPayload": {
+				{Name: "dropId", Type: "uint256"},
+				{Name: "requestID", Type: "uint256"},
+				{Name: "claimant", Type: "address"},
+				{Name: "blockDeadline", Type: "uint256"},
+				{Name: "amount", Type: "uint256"},
+			},
+		},
+		PrimaryType: "ClaimPayload",
+		Domain: apitypes.TypedDataDomain{
+			Name:              "Game7 Dropper",
+			Version:           "3.0",
+			ChainId:           (*math.HexOrDecimal256)(big.NewInt(chainId)),
+			VerifyingContract: dropperAddress,
+		},
+		Message: apitypes.TypedDataMessage{
+			"dropId":        dropId,
+			"requestID":     requestId,
+			"claimant":      claimant,
+			"blockDeadline": blockDeadline,
+			"amount":        amount,
+		},
+	}
+
+	messageHash, _, err := apitypes.TypedDataAndHash(signerData)
+	return messageHash, err
+}
